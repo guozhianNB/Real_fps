@@ -95,6 +95,16 @@ def shutdown_event():
         camera_manager.release()
         camera_manager = None
 
+@app.get("/size")         #提供摄像头图片尺寸的接口，返回 JSON 格式的宽高信息
+def get_camera_size():
+    """返回摄像头图片的尺寸信息，供其他程序查询。"""
+    manager = _get_camera_manager()
+    frame = manager.get_latest_frame()
+    if frame is None:
+        raise HTTPException(status_code=503, detail="当前没有可用的摄像头画面")
+    height, width = frame.shape[:2]
+    return {"width": width, "height": height}
+
 
 def _encode_frame(frame, quality=85):       #将帧编码为 JPEG 格式的字节流
     success, buffer = cv2.imencode(

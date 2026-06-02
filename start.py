@@ -25,7 +25,7 @@ def start():
     time.sleep(2)
 
     # 启动主程序（阻塞等待结束）
-    subprocess.run([sys.executable, "main.py"])
+    subprocess.run([sys.executable, "vision.py"])
 
     # 主程序退出后关闭摄像头服务
     camera_process.terminate()
