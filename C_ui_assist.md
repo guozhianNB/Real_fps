@@ -89,8 +89,14 @@ alpha = max(0, 255 - dt * (255 / 1000))
 # 安装 Pygame
 pip install pygame
 
+# 安装 requests（摄像头画面拉取）
+pip install requests
+
+# 安装 opencv-python（图像解码）
+pip install opencv-python
+
 # 如果 pip 不行，用这个：
-python -m pip install pygame
+python -m pip install pygame requests opencv-python
 
 # 验证安装
 python -c "import pygame; print('Pygame 版本:', pygame.version.ver)"
@@ -1137,6 +1143,10 @@ if __name__ == "__main__":
 3. 显示你的雷达、HUD、动画效果
 
 **B 也可以用这个文件测试整体 UI。**
+
+> 💡 **关于摄像头画面：** 摄像头走独立的 FastAPI 服务（`camera_share.py`，端口 8010），
+> B 的 `core.py` 会通过 HTTP 拉取 JPEG 图片作为窗口背景。
+> 你的组件（雷达、HUD、动画）始终叠加在背景之上，不需要关心摄像头画面本身。
 
 ```python
 # ui/demo_reader.py

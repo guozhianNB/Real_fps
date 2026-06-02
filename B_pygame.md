@@ -99,8 +99,11 @@ pip install pygame
 # 安装 pyee（用于事件广播，C 队友需要）
 pip install pyee
 
+# 安装 requests（用于从摄像头服务拉取画面）
+pip install requests
+
 # 如果提示 pip 不是命令，用这个：
-python -m pip install pygame pyee
+python -m pip install pygame pyee requests
 
 # 验证是否安装成功（没有报错就 OK）
 python -c "import pygame; print('Pygame 版本:', pygame.version.ver)"
@@ -473,9 +476,84 @@ for i in range(5):
 
 你会创建两个后台线程：
 1. **JSON 读取线程**：每 50ms 读一次 `state.json`，结果放入队列
-2. **摄像头读取线程**（可选）：每 33ms 读一帧摄像头画面
+2. **摄像头拉取线程**（见下文）：每 33ms 从 FastAPI 拉取一帧画面
 
-主循环只从队列取数据，不做文件 IO。
+主循环只从队列取数据，不做文件 IO 或网络请求。
+
+---
+
+## 8.5 摄像头画面从哪来？
+
+> ⚠️ **重要：摄像头画面不放在 state.json 里！**
+> 它走独立的 FastAPI 服务，UI 通过 HTTP 拉取 JPEG 图片。
+
+### camera_share.py 是什么？
+
+队友在项目根目录下提供了一个 `camera_share.py`，它是一个**独立的摄像头服务**：
+
+```
+camera_share.py
+  └── FastAPI 服务 (端口 8010)
+       └── GET /snapshot → 返回最新摄像头帧的 JPEG 图片
+```
+
+它做的事情：
+1. 打开你的摄像头（USB 摄像头或笔记本内置摄像头）
+2. 在后台线程中持续采集画面
+3. 当你访问 `http://127.0.0.1:8010/snapshot` 时，返回最新一帧的 JPEG
+
+### 如何启动它？
+
+你需要**另开一个终端**，先启动摄像头服务：
+
+```powershell
+# 终端 1：启动摄像头服务
+uvicorn camera_share:app --port 8010 --host 127.0.0.1 --reload
+```
+
+看到输出 `摄像头服务已启动` 就说明成功了。
+
+### 你的 UI 怎么拿到画面？
+
+你的 `core.py` 已经集成了摄像头拉取线程。它会：
+1. 每 33ms 访问一次 `http://127.0.0.1:8010/snapshot`
+2. 拿到 JPEG → 解码为 numpy 数组 → 放入队列
+3. 主循环从队列取出 → 转为 Pygame Surface → 铺满全屏
+
+整个流程：
+
+```
+camera_share.py         你的 UI (core.py)
+  │                          │
+  │ 启动后持续采集摄像头      │
+  │                          │
+  │   GET /snapshot ◄─────── │ 每 33ms 拉取一次
+  │   ──── JPEG ──────────► │
+  │                          │ 解码 → 转为 Surface
+  │                          │ → blit 到屏幕背景
+```
+
+### 测试步骤
+
+```powershell
+# 终端 1：启动摄像头服务
+uvicorn camera_share:app --port 8010 --host 127.0.0.1 --reload
+
+# 终端 2：启动状态模拟器
+python ui/demo_emitter.py
+
+# 终端 3：启动 UI
+python -c "from ui.core import UI; UI(fullscreen=False).start()"
+```
+
+这样你就能看到**摄像头画面作为背景 + 准星/HUD 叠加在上面**的效果了。
+
+### 如果摄像头启动失败怎么办？
+
+- 检查摄像头是否被其他程序占用（如 Zoom、OBS）
+- 尝试换个 USB 口
+- 如果还是没有画面，UI 会显示黑色背景 + 提示文字，不会崩溃
+- 可以在 `camera_share.py` 中修改 `camera_id=0` 为 `camera_id=1` 试试另一个摄像头
 
 ---
 
@@ -556,6 +634,8 @@ import queue
 import time
 import sys
 import os
+import cv2          # 用于解码摄像头 JPEG → numpy
+import numpy as np  # 用于图像数据处理
 
 # 导入配置文件
 from ui.config import *
@@ -654,6 +734,61 @@ class UI:
         print("[UI] JSON 读取线程已启动")
     
     # ==========================================
+    #   后台线程：摄像头画面拉取（从 FastAPI）
+    # ==========================================
+    
+    def _start_camera_reader(self):
+        """启动摄像头画面拉取线程。
+        
+        从 camera_share.py 的 FastAPI 服务拉取 JPEG 图片，
+        解码后放入队列供主循环使用。
+        
+        camera_share 运行方式（需另开终端）：
+            uvicorn camera_share:app --port 8010 --host 127.0.0.1 --reload
+        """
+        import requests  # 注意：需要 pip install requests
+        import io
+        import numpy as np
+        
+        CAMERA_URL = "http://127.0.0.1:8010/snapshot"
+        
+        def reader_loop():
+            """后台循环（在独立线程中运行）"""
+            fail_count = 0
+            while not self._stop_reader.is_set():
+                try:
+                    # 从 FastAPI 拉取 JPEG 图片
+                    resp = requests.get(CAMERA_URL, timeout=1.0)
+                    if resp.status_code == 200:
+                        # 把 JPEG 字节解码为 numpy 数组（BGR 格式）
+                        img_array = np.frombuffer(resp.content, dtype=np.uint8)
+                        frame = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
+                        if frame is not None:
+                            # 把 BGR 转为 RGB（Pygame 用 RGB）
+                            frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                            self.event_q.put(("camera_frame", frame_rgb))
+                            fail_count = 0
+                        else:
+                            fail_count += 1
+                    else:
+                        fail_count += 1
+                except requests.ConnectionError:
+                    fail_count += 1
+                    if fail_count == 1:  # 只在第一次报错
+                        print("[UI] 摄像头服务未启动，请运行: uvicorn camera_share:app --port 8010")
+                except Exception as e:
+                    fail_count += 1
+                    if fail_count == 1:
+                        print(f"[UI] 摄像头拉取错误: {e}")
+                
+                # 每 33ms 拉取一帧（≈30 FPS）
+                time.sleep(0.033)
+        
+        thread = threading.Thread(target=reader_loop, daemon=True)
+        thread.start()
+        print("[UI] 摄像头拉取线程已启动")
+    
+    # ==========================================
     #   主循环
     # ==========================================
     
@@ -669,7 +804,8 @@ class UI:
         pygame.display.set_caption("Real FPS")
         
         # ---- 启动后台线程 ----
-        self._start_json_reader()  # 开始读取 JSON
+        self._start_json_reader()   # 开始读取 JSON
+        self._start_camera_reader() # 开始拉取摄像头画面
         
         # ---- 进入主循环 ----
         print("[UI] 进入主循环")
@@ -774,7 +910,7 @@ class UI:
         """绘制一帧画面。
         
         绘制顺序（从下到上）：
-            1. 摄像头背景（如果有）
+            1. 摄像头背景（从 FastAPI 拉取的画面）
             2. 目标框
             3. 准星
             4. HUD（C 负责）
@@ -783,16 +919,29 @@ class UI:
         """
         state = self.latest_state  # 简写
         
-        # ---- 1. 背景 ----
+        # ---- 1. 背景：摄像头画面 or 黑色 ----
         if self.latest_frame is not None:
-            # 有摄像头画面时，把它作为背景
-            # 这段代码会在接入摄像头后完善
-            self.screen.fill(COLOR_BLACK)
+            # 把 numpy 数组（RGB）转为 Pygame Surface
+            # latest_frame 是 RGB 格式的 numpy 数组
+            frame_surface = pygame.surfarray.make_surface(
+                self.latest_frame.swapaxes(0, 1)
+            )
+            # 缩放到窗口大小
+            frame_surface = pygame.transform.scale(
+                frame_surface, (self.width, self.height)
+            )
+            self.screen.blit(frame_surface, (0, 0))
         else:
-            # 没有摄像头时，显示黑色背景
+            # 没有摄像头画面时，显示黑色背景 + 提示
             self.screen.fill(COLOR_BLACK)
+            if not hasattr(self, '_camera_warned'):
+                font = pygame.font.Font(None, 36)
+                warn = font.render("等待摄像头画面... 请启动 camera_share.py", True, COLOR_WHITE)
+                warn_rect = warn.get_rect(center=(self.width//2, self.height//2))
+                self.screen.blit(warn, warn_rect)
+                self._camera_warned = True
         
-        # ---- 2. 目标框 ----
+        # ---- 2. 目标框（从 JSON 读取） ----
         # 从 JSON 中读取 targets 列表，为每个目标画框
         targets = state.get("targets", [])
         for target in targets:
@@ -1020,12 +1169,17 @@ if __name__ == "__main__":
 **测试步骤：**
 
 ```powershell
-# 打开终端 1：启动模拟器
+# 终端 1：启动摄像头服务（可选，没有也不影响测试）
+uvicorn camera_share:app --port 8010 --host 127.0.0.1 --reload
+
+# 终端 2：启动模拟器
 python ui/demo_emitter.py
 
-# 打开终端 2：启动 UI
+# 终端 3：启动 UI
 python -c "from ui.core import UI; UI(fullscreen=False).start()"
 ```
+
+> 摄像头服务不是必须的。没有它 UI 会显示黑色背景 + 提示文字，准星和 HUD 依然正常工作。
 
 ---
 
