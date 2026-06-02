@@ -1207,7 +1207,6 @@ def main():
         
         # ---- 处理事件 ----
         for event in pygame.event.get():
-            if event.type == pygame.QUIT:
                 running = False
             elif event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_ESCAPE:
@@ -1242,6 +1241,13 @@ def main():
         # ---- 刷新 ----
         pygame.display.flip()
     
+        radar.render(screen, targets, dt_ms=dt)
+        hud.render(screen, state, int(clock.get_fps()), dt)
+        effects.render(screen)
+        
+        # ---- 刷新 ----
+        pygame.display.flip()
+    
     # ---- 清理 ----
     writer.stop()
     pygame.quit()
@@ -1249,12 +1255,7 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
-```
-
----
-
-## 10. 如何和 B 对接
+    main(
 
 B 的 `core.py` 中预留了三个空位，等你把组件交给他：
 
