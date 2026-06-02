@@ -1,8 +1,17 @@
 # Real FPS 依赖清单
 # 安装方式：pip install -r requirement.txt
 
+numpy
+
+#服务端
+fastapi
+uvicorn
+
 pygame>=2.5.0          # UI 渲染（B 和 C 使用）
 pyee>=12.0.0           # 事件广播（D 使用）
 pynput>=1.7.6          # 鼠标/键盘监听（D 使用）
 pyserial>=3.5          # 串口通信（A 串口模块使用）
 
+#图像处理
+opencv-python
+ultralytics
