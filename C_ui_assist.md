@@ -344,7 +344,7 @@ class Radar:
         参数：
             surface: 要绘制到的 Pygame Surface
             targets: 目标列表（每个目标有 cx, cy, id）
-            locked_target_id: 当前锁定目标的 ID（用于高亮）
+            locked_target_id: 不使用（保留参数兼容）
             dt_ms: 距上一帧的毫秒数（用于动画）
         """
         cx, cy, r = self.center_x, self.center_y, self.radius
@@ -410,27 +410,14 @@ class Radar:
             else:
                 radar_x, radar_y = cx, cy
             
-            # 判断是否为目标锁定
-            is_locked = (locked_target_id is not None and 
-                         target.get("id") == locked_target_id)
-            
-            # 锁定目标用红色，闪烁频率快一些
-            # 普通目标用绿色，闪烁频率慢一些
-            if is_locked:
-                color = COLOR_RED
-                blink_speed = 200  # 200ms 闪烁一次
-            else:
-                color = COLOR_GREEN
-                blink_speed = 400  # 400ms 闪烁一次
+            # 所有目标统一绿色闪烁
+            color = COLOR_GREEN
+            blink_speed = 400  # 400ms 闪烁一次
             
             # 闪烁效果：当 (blink_timer % blink_speed) < blink_speed/2 时显示
             if (self.blink_timer % blink_speed) < (blink_speed // 2):
                 # 画目标点
                 pygame.draw.circle(surface, color, (int(radar_x), int(radar_y)), 4)
-                
-                # 如果是锁定目标，加一个外圈
-                if is_locked:
-                    pygame.draw.circle(surface, color, (int(radar_x), int(radar_y)), 7, 1)
         
         # ---- 6. 画雷达标题 ----
         label = self.font.render("RADAR", True, COLOR_GREEN)
@@ -627,12 +614,8 @@ class HUD:
         surface.blit(fps_surf, (HUD_MARGIN, HUD_MARGIN + 75))
         
         # ---- 6. 底部状态栏 ----
-        # 根据 mode 决定颜色
+        # 只有 error 时变红，其余一律白色
         if mode == "error":
-            status_color = COLOR_RED
-        elif mode == "firing":
-            status_color = COLOR_YELLOW
-        elif mode == "locked":
             status_color = COLOR_RED
         else:
             status_color = COLOR_WHITE
@@ -747,7 +730,6 @@ if __name__ == "__main__":
 # 功能：
 #   - 命中闪光（全屏白色半透明闪烁）
 #   - 得分弹出提示（+分数）
-#   - 爆头提示（大字 HEADSHOT）
 #
 # 独立测试：python ui/effects.py
 
@@ -758,7 +740,7 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from ui.config import *
-from ui.assets import get_font_large, get_font_huge, get_font_small
+from ui.assets import get_font_large, get_font_small
 
 # ==============================================
 #   效果基类
@@ -899,76 +881,13 @@ class ScorePopup(BaseEffect):
 
 
 # ==============================================
-#   爆头提示（HEADSHOT）
-# ==============================================
-
-class HeadshotPopup(BaseEffect):
-    """爆头提示：显示大字 HEADSHOT，红色，带缩放动画。
-    
-    生命周期：淡入 200ms → 保持 1000ms → 淡出 400ms
-    播放完后，ScorePopup 也会同时显示分数。
-    """
-    
-    def __init__(self):
-        super().__init__(duration_ms=POPUP_FADEIN_MS + POPUP_HOLD_MS + POPUP_FADEOUT_MS)
-        self.font = get_font_huge()
-    
-    def render(self, surface):
-        """绘制爆头提示。"""
-        if not self.active:
-            return
-        
-        # 计算当前阶段（和 ScorePopup 相同逻辑）
-        fadein_end = POPUP_FADEIN_MS
-        hold_end = fadein_end + POPUP_HOLD_MS
-        fadeout_end = hold_end + POPUP_FADEOUT_MS
-        
-        alpha = 0
-        scale = 1.0
-        
-        if self.elapsed_ms < fadein_end:
-            # 淡入 + 放大
-            progress = self.elapsed_ms / fadein_end
-            alpha = int(255 * progress)
-            scale = 1.0 + 0.3 * (1 - progress)  # 从 1.3 缩放到 1.0
-        elif self.elapsed_ms < hold_end:
-            # 保持
-            alpha = 255
-            scale = 1.0
-        elif self.elapsed_ms < fadeout_end:
-            # 淡出
-            progress = (self.elapsed_ms - hold_end) / POPUP_FADEOUT_MS
-            alpha = int(255 * (1 - progress))
-            scale = 1.0
-        
-        alpha = max(0, min(255, alpha))
-        
-        # 渲染文字
-        text_surf = self.font.render("HEADSHOT", True, COLOR_RED)
-        
-        # 缩放
-        new_width = int(text_surf.get_width() * scale)
-        new_height = int(text_surf.get_height() * scale)
-        text_scaled = pygame.transform.scale(text_surf, (new_width, new_height))
-        
-        # 透明度
-        text_scaled.set_alpha(alpha)
-        
-        # 屏幕中央
-        text_rect = text_scaled.get_rect(
-            center=(surface.get_width() // 2, surface.get_height() // 2 - 100)
-        )
-        surface.blit(text_scaled, text_rect)
-
-
-# ==============================================
 #   Effects 管理器
 # ==============================================
 
 class Effects:
     """动画效果管理器。
     
-    管理多个同时运行的效果（闪光、得分提示、爆头提示）。
+    管理多个同时运行的效果（闪光、得分提示）。
     
     用法：
         effects = Effects()
@@ -1008,10 +927,6 @@ class Effects:
         if score_delta > 0 and score_delta != self.prev_score_delta:
             # 加分了！添加得分提示
             self.active_effects.append(ScorePopup(score_delta, score_reason))
-            
-            # 如果是爆头，额外添加爆头提示
-            if score_reason == "headshot":
-                self.active_effects.append(HeadshotPopup())
         
         self.prev_score_delta = score_delta
         
@@ -1070,29 +985,17 @@ def test_effects():
                 elif event.key == pygame.K_SPACE:
                     # 按空格手动触发开火
                     test_state["fire_state"]["fired"] = True
-                elif event.key == pygame.K_s:
-                    # 按 S 手动触发得分
-                    test_state["score"]["delta"] = 50
-                    test_state["score"]["reason"] = "hit"
-                    test_state["score"]["value"] += 50
         
         # 自动触发场景（每 3 秒）
         if timer > 3000:
             timer = 0
             event_count += 1
             
-            if event_count % 2 == 1:
-                # 奇数次：开火 + 普通命中
-                test_state["fire_state"]["fired"] = True
-                test_state["score"]["delta"] = 10
-                test_state["score"]["reason"] = "hit"
-                test_state["score"]["value"] += 10
-            else:
-                # 偶数次：爆头
-                test_state["fire_state"]["fired"] = True
-                test_state["score"]["delta"] = 150
-                test_state["score"]["reason"] = "headshot"
-                test_state["score"]["value"] += 150
+            # 开火 + 命中
+            test_state["fire_state"]["fired"] = True
+            test_state["score"]["delta"] = 10
+            test_state["score"]["reason"] = "hit"
+            test_state["score"]["value"] += 10
         
         # 重置单次事件
         if test_state["fire_state"]["fired"]:
@@ -1115,8 +1018,7 @@ def test_effects():
             f"活跃效果数: {len(effects.active_effects)}"
         ]
         for i, line in enumerate(info_lines):
-            text = font.render(line, True, COLOR_WHITE)
-            screen.blit(text, (20, 20 + i * 25))
+            t每 3 秒自动触发一次text, (20, 20 + i * 25))
         
         effects.render(screen)
         
@@ -1134,8 +1036,7 @@ if __name__ == "__main__":
 ```
 
 ---
-
-## 9. 文件 6：`ui/demo_reader.py` — 自测入口
+i/demo_reader.py` — 自测入口
 
 这是**你的自测工具**。它会：
 1. 自动模拟主程序写出 `state.json`
@@ -1211,69 +1112,36 @@ class MockStateWriter:
             # 场景 0：空闲
             {
                 "system_state": {"mode": "idle", "msg": "等待目标"},
-                "aim_state": {"on_target": False, "hit_zone": "none", "target_id": None, "conf": 0},
-                "fire_state": {"ready": False, "fired": False, "cooldown_ms": 0},
-                "target_lock": {"locked": False, "target_id": None, "cx": 0, "cy": 0, "distance": 0},
+                "fire_state": {"fired": False},
                 "score": {"value": 0, "delta": 0, "reason": ""},
                 "targets": [],
                 "serial": {"status": "OK", "msg": "connected"}
             },
             # 场景 1：追踪一个目标
             {
-                "system_state": {"mode": "tracking", "msg": "目标已发现"},
-                "aim_state": {"on_target": False, "hit_zone": "none", "target_id": 1, "conf": 0.85},
-                "fire_state": {"ready": True, "fired": False, "cooldown_ms": 0},
-                "target_lock": {"locked": False, "target_id": 1, "cx": 700, "cy": 300, "distance": 80},
+                "system_state": {"mode": "playing", "msg": "目标已发现"},
+                "fire_state": {"fired": False},
                 "score": {"value": 0, "delta": 0, "reason": ""},
                 "targets": [
                     {"id": 1, "class": "person", "conf": 0.85, "bbox": [620, 240, 780, 420], "cx": 700, "cy": 330}
                 ],
                 "serial": {"status": "OK", "msg": "connected"}
             },
-            # 场景 2：追踪两个目标
+            # 场景 2：命中
             {
-                "system_state": {"mode": "tracking", "msg": "多目标"},
-                "aim_state": {"on_target": False, "hit_zone": "none", "target_id": 2, "conf": 0.78},
-                "fire_state": {"ready": True, "fired": False, "cooldown_ms": 0},
-                "target_lock": {"locked": False, "target_id": 2, "cx": 500, "cy": 400, "distance": 60},
-                "score": {"value": 0, "delta": 0, "reason": ""},
-                "targets": [
-                    {"id": 1, "class": "person", "conf": 0.85, "bbox": [620, 240, 780, 420], "cx": 700, "cy": 330},
-                    {"id": 2, "class": "person", "conf": 0.78, "bbox": [450, 340, 550, 460], "cx": 500, "cy": 400}
-                ],
-                "serial": {"status": "OK", "msg": "connected"}
-            },
-            # 场景 3：锁定 + 开火
-            {
-                "system_state": {"mode": "locked", "msg": "目标已锁定"},
-                "aim_state": {"on_target": True, "hit_zone": "body", "target_id": 1, "conf": 0.92},
-                "fire_state": {"ready": True, "fired": True, "cooldown_ms": 500},
-                "target_lock": {"locked": True, "target_id": 1, "cx": 640, "cy": 360, "distance": 5},
+                "system_state": {"mode": "playing", "msg": "命中！"},
+                "fire_state": {"fired": True},
                 "score": {"value": 50, "delta": 50, "reason": "hit"},
                 "targets": [
                     {"id": 1, "class": "person", "conf": 0.92, "bbox": [600, 320, 680, 400], "cx": 640, "cy": 360}
                 ],
                 "serial": {"status": "OK", "msg": "connected"}
             },
-            # 场景 4：爆头
+            # 场景 3：串口断开
             {
-                "system_state": {"mode": "firing", "msg": "HEADSHOT!"},
-                "aim_state": {"on_target": True, "hit_zone": "head", "target_id": 1, "conf": 0.94},
-                "fire_state": {"ready": True, "fired": True, "cooldown_ms": 800},
-                "target_lock": {"locked": True, "target_id": 1, "cx": 640, "cy": 350, "distance": 2},
-                "score": {"value": 200, "delta": 150, "reason": "headshot"},
-                "targets": [
-                    {"id": 1, "class": "person", "conf": 0.94, "bbox": [610, 310, 670, 390], "cx": 640, "cy": 350}
-                ],
-                "serial": {"status": "OK", "msg": "connected"}
-            },
-            # 场景 5：串口断开
-            {
-                "system_state": {"mode": "error", "msg": "串口连接断开"},
-                "aim_state": {"on_target": False, "hit_zone": "none", "target_id": None, "conf": 0},
-                "fire_state": {"ready": False, "fired": False, "cooldown_ms": 0},
-                "target_lock": {"locked": False, "target_id": None, "cx": 0, "cy": 0, "distance": 0},
-                "score": {"value": 200, "delta": 0, "reason": ""},
+                "system_state": {"mode": "over", "msg": "串口连接断开"},
+                "fire_state": {"fired": False},
+                "score": {"value": 50, "delta": 0, "reason": ""},
                 "targets": [],
                 "serial": {"status": "ERROR", "msg": "disconnected"}
             },

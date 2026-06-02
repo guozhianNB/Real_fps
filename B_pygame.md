@@ -396,11 +396,9 @@ def read_status():
 ```json
 {
     "timestamp": 1717320000.0,
-    "system_state": {"mode": "tracking", "msg": "normal"},
-    "aim_state": {"on_target": true, "hit_zone": "body", "target_id": 3, "conf": 0.94},
-    "fire_state": {"ready": true, "fired": false, "cooldown_ms": 0},
-    "target_lock": {"locked": true, "target_id": 3, "cx": 640, "cy": 360, "distance": 18.2},
-    "score": {"value": 120, "delta": 10, "reason": "headshot"},
+    "system_state": {"mode": "playing", "msg": "normal"},
+    "fire_state": {"fired": false},
+    "score": {"value": 120, "delta": 10, "reason": "hit"},
     "targets": [
         {"id": 3, "class": "person", "conf": 0.94, "bbox": [600, 300, 680, 420], "cx": 640, "cy": 360}
     ],
@@ -409,9 +407,8 @@ def read_status():
 ```
 
 各字段含义：
-- `system_state.mode`：当前状态 `idle` / `tracking` / `locked` / `firing` / `error`
-- `aim_state.on_target`：准星是否在目标上
-- `fire_state.fired`：是否刚开火（触发动画）
+- `system_state.mode`：当前状态 `idle` / `playing` / `paused` / `over`
+- `fire_state.fired`：是否刚开火（触发闪光动画）
 - `score.value`：当前分数，`score.delta`：本帧加了多少分
 - `targets`：所有检测到的目标列表
 - `serial.status`：串口状态
@@ -950,26 +947,21 @@ class UI:
                 x1, y1, x2, y2 = bbox
                 rect = pygame.Rect(x1, y1, x2 - x1, y2 - y1)
                 
-                # 锁定目标用红色，普通目标用绿色
-                is_locked = state.get("target_lock", {}).get("locked", False)
-                locked_id = state.get("target_lock", {}).get("target_id")
-                color = COLOR_RED if (is_locked and target.get("id") == locked_id) else COLOR_GREEN
-                
-                pygame.draw.rect(self.screen, color, rect, 2)
+                # 所有目标都用绿色框
+                pygame.draw.rect(self.screen, COLOR_GREEN, rect, 2)
                 
                 # 在框上方显示目标 ID 和置信度
                 label = f"ID:{target.get('id', '?')} {target.get('conf', 0):.2f}"
                 if 'font_small' in dir(self):
-                    text = self.font_small.render(label, True, color)
+                    text = self.font_small.render(label, True, COLOR_GREEN)
                     self.screen.blit(text, (x1, y1 - 20))
         
-        # ---- 3. 准星（画面正中央） ----
+        # ---- 3. 准星（画面正中央，始终绿色） ----
         center_x, center_y = self.width // 2, self.height // 2
         cs = CROSSHAIR_SIZE
         
-        # 准星颜色：锁定目标时变红
-        is_locked = state.get("target_lock", {}).get("locked", False)
-        crosshair_color = COLOR_RED if is_locked else COLOR_GREEN
+        # 准星颜色固定为绿色，只在开火时闪烁一下
+        crosshair_color = COLOR_GREEN
         
         # 外圈
         pygame.draw.circle(self.screen, crosshair_color, (center_x, center_y), 15, 2)
@@ -1005,7 +997,7 @@ class UI:
             sys_mode = state.get("system_state", {}).get("mode", "idle")
             sys_msg = state.get("system_state", {}).get("msg", "")
             serial_status = state.get("serial", {}).get("status", "N/A")
-            status_text = f"MODE: {sys_mode}  |  SERIAL: {serial_status}"
+            status_text = f"MODE: {sys_mode.upper()}  |  SERIAL: {serial_status}"
             if sys_msg:
                 status_text += f"  |  {sys_msg}"
             
@@ -1087,9 +1079,7 @@ def demo_loop():
     scene_idle = {
         "timestamp": time.time(),
         "system_state": {"mode": "idle", "msg": "等待目标"},
-        "aim_state": {"on_target": False, "hit_zone": "none", "target_id": None, "conf": 0},
-        "fire_state": {"ready": False, "fired": False, "cooldown_ms": 0},
-        "target_lock": {"locked": False, "target_id": None, "cx": 0, "cy": 0, "distance": 0},
+        "fire_state": {"fired": False},
         "score": {"value": 0, "delta": 0, "reason": ""},
         "targets": [],
         "serial": {"status": "OK", "msg": "connected"}
@@ -1098,10 +1088,8 @@ def demo_loop():
     # 场景 2：追踪（一个目标）
     scene_tracking = {
         "timestamp": time.time(),
-        "system_state": {"mode": "tracking", "msg": "目标已发现"},
-        "aim_state": {"on_target": False, "hit_zone": "none", "target_id": 1, "conf": 0.85},
-        "fire_state": {"ready": True, "fired": False, "cooldown_ms": 0},
-        "target_lock": {"locked": False, "target_id": 1, "cx": 640, "cy": 360, "distance": 50},
+        "system_state": {"mode": "playing", "msg": "目标已发现"},
+        "fire_state": {"fired": False},
         "score": {"value": 0, "delta": 0, "reason": ""},
         "targets": [
             {"id": 1, "class": "person", "conf": 0.85, "bbox": [580, 300, 700, 420], "cx": 640, "cy": 360}
@@ -1109,48 +1097,30 @@ def demo_loop():
         "serial": {"status": "OK", "msg": "connected"}
     }
     
-    # 场景 3：锁定（准星在目标上）
-    scene_locked = {
-        "timestamp": time.time(),
-        "system_state": {"mode": "locked", "msg": "目标已锁定"},
-        "aim_state": {"on_target": True, "hit_zone": "body", "target_id": 1, "conf": 0.92},
-        "fire_state": {"ready": True, "fired": False, "cooldown_ms": 0},
-        "target_lock": {"locked": True, "target_id": 1, "cx": 640, "cy": 360, "distance": 5},
-        "score": {"value": 50, "delta": 50, "reason": "hit"},
-        "targets": [
-            {"id": 1, "class": "person", "conf": 0.92, "bbox": [600, 320, 680, 400], "cx": 640, "cy": 360}
-        ],
-        "serial": {"status": "OK", "msg": "connected"}
-    }
-    
-    # 场景 4：开火命中
+    # 场景 3：开火命中
     scene_firing = {
         "timestamp": time.time(),
-        "system_state": {"mode": "firing", "msg": "命中！"},
-        "aim_state": {"on_target": True, "hit_zone": "head", "target_id": 1, "conf": 0.94},
-        "fire_state": {"ready": True, "fired": True, "cooldown_ms": 500},
-        "target_lock": {"locked": True, "target_id": 1, "cx": 640, "cy": 350, "distance": 2},
-        "score": {"value": 200, "delta": 150, "reason": "headshot"},
+        "system_state": {"mode": "playing", "msg": "命中！"},
+        "fire_state": {"fired": True},
+        "score": {"value": 50, "delta": 50, "reason": "hit"},
         "targets": [
             {"id": 1, "class": "person", "conf": 0.94, "bbox": [610, 310, 670, 390], "cx": 640, "cy": 350}
         ],
         "serial": {"status": "OK", "msg": "connected"}
     }
     
-    # 场景 5：串口断开
+    # 场景 4：串口断开
     scene_error = {
         "timestamp": time.time(),
-        "system_state": {"mode": "error", "msg": "串口连接断开"},
-        "aim_state": {"on_target": False, "hit_zone": "none", "target_id": None, "conf": 0},
-        "fire_state": {"ready": False, "fired": False, "cooldown_ms": 0},
-        "target_lock": {"locked": False, "target_id": None, "cx": 0, "cy": 0, "distance": 0},
-        "score": {"value": 200, "delta": 0, "reason": ""},
+        "system_state": {"mode": "over", "msg": "串口连接断开"},
+        "fire_state": {"fired": False},
+        "score": {"value": 50, "delta": 0, "reason": ""},
         "targets": [],
         "serial": {"status": "ERROR", "msg": "disconnected"}
     }
     
-    scenes = [scene_idle, scene_tracking, scene_locked, scene_firing, scene_error]
-    scene_names = ["空闲", "追踪", "锁定", "开火命中", "串口断开"]
+    scenes = [scene_idle, scene_tracking, scene_firing, scene_error]
+    scene_names = ["空闲", "追踪", "开火命中", "串口断开"]
     
     try:
         while True:
