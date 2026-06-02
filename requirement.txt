@@ -1,0 +1,6 @@
+# Real FPS 依赖清单
+# 安装方式：pip install -r requirement.txt
+
+pygame>=2.5.0          # UI 渲染（B 和 C 使用）
+pyee>=12.0.0           # 事件广播（D 使用）
+pynput>=1.7.6          # 鼠标/键盘监听（D 使用）

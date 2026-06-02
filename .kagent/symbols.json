@@ -1,0 +1,69 @@
+{
+  "symbols": {
+    ".vscode/settings.json": {
+      "ipo_ts": 1780395570559,
+      "edit_count": 2,
+      "last_lines": 4,
+      "last_ts": 1780395570615,
+      "delisted": false,
+      "last_source": "onSave",
+      "last_content_hash": "40741f80"
+    },
+    "requirement.txt": {
+      "ipo_ts": 1780395716600,
+      "edit_count": 2,
+      "last_lines": 6,
+      "last_ts": 1780398470530,
+      "delisted": false,
+      "last_source": "onSave",
+      "last_content_hash": "60be3982"
+    },
+    "B_pygame.md": {
+      "ipo_ts": 1780395720395,
+      "edit_count": 7,
+      "last_lines": 1066,
+      "last_ts": 1780398392526,
+      "delisted": false,
+      "last_source": "onSave",
+      "last_content_hash": "5adff9b4"
+    },
+    "readme.md": {
+      "ipo_ts": 1780396195618,
+      "edit_count": 11,
+      "last_lines": 1254,
+      "last_ts": 1780399304548,
+      "delisted": false,
+      "last_source": "onSave",
+      "last_content_hash": "ca038b84"
+    },
+    "D_mouse.md": {
+      "ipo_ts": 1780396529012,
+      "edit_count": 5,
+      "last_lines": 1137,
+      "last_ts": 1780398688756,
+      "delisted": false,
+      "last_source": "onSave",
+      "last_content_hash": "59d45b27"
+    },
+    "C_vision.md": {
+      "ipo_ts": 1780397917891,
+      "edit_count": 2,
+      "last_lines": 107,
+      "last_ts": 1780397917927,
+      "delisted": true,
+      "last_source": "onSave",
+      "last_content_hash": "3e510820",
+      "delisted_at": 1780398153306,
+      "delist_rounds": 0
+    },
+    "C_ui_assist.md": {
+      "ipo_ts": 1780398043791,
+      "edit_count": 4,
+      "last_lines": 1461,
+      "last_ts": 1780398466257,
+      "delisted": false,
+      "last_source": "onSave",
+      "last_content_hash": "522cfa6b"
+    }
+  }
+}
