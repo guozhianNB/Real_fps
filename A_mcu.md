@@ -1,155 +1,114 @@
-# A — 单片机舵机控制
+# A — 单片机舵机控制（PID 版）
 
-> 这份文档是 Arduino/STM32 端的代码，负责解析串口指令并输出 PWM 控制舵机。
+> STM32F103C8T6 端代码，通过串口接收误差值，**PID 控制器**实时计算舵机角度并输出 PWM。
 
 ---
 
 ## 职责
 
-1. 通过串口接收 `X:角度,Y:角度\n` 格式指令
-2. 解析出水平和俯仰角度
+1. 通过串口接收 `error_x,error_y\n` 格式误差值
+2. **PID 控制器**根据误差计算舵机调整量
 3. 输出 PWM 信号驱动两个舵机
-4. 限幅（0-180°）、平滑插值
-5. 响应 `RESET`、`STOP`、`STATUS?` 指令
+4. 限幅（0-180°）、积分抗饱和
+5. 逐字节串口接收，不丢帧
 
 ---
 
-## 接线
+## 接线（STM32F103C8T6）
 
 ```
-舵机1（水平）→ 信号线 → Pin 9
-舵机2（俯仰）→ 信号线 → Pin 10
-舵机电源   → 5V / GND（外部供电，不接 Arduino 5V）
-Arduino    → USB 连电脑
-```
-
----
-
-## Arduino 代码（servo_control.ino）
-
-```cpp
-#include <Servo.h>
-
-// ====== 引脚定义 ======
-const int PIN_SERVO_X = 9;   // 水平舵机
-const int PIN_SERVO_Y = 10;  // 俯仰舵机
-
-// ====== 舵机对象 ======
-Servo servo_x;
-Servo servo_y;
-
-// ====== 角度状态 ======
-int target_x = 90;   // 目标角度
-int target_y = 90;
-int current_x = 90;  // 当前实际角度（用于平滑）
-int current_y = 90;
-
-// ====== 平滑参数 ======
-const int STEP_SIZE = 2;   // 每帧最大移动步长（越大越快）
-const int INTERVAL_MS = 15; // 每 15ms 移动一步（≈ 66Hz）
-
-// ====== 串口缓冲区 ======
-String buffer = "";
-
-void setup() {
-    Serial.begin(115200);
-    
-    servo_x.attach(PIN_SERVO_X);
-    servo_y.attach(PIN_SERVO_Y);
-    
-    // 回中
-    servo_x.write(90);
-    servo_y.write(90);
-    
-    Serial.println("OK");
-}
-
-void loop() {
-    // ---- 1. 处理串口指令 ----
-    while (Serial.available()) {
-        char c = Serial.read();
-        if (c == '\n') {
-            process_command(buffer);
-            buffer = "";
-        } else {
-            buffer += c;
-        }
-    }
-    
-    // ---- 2. 平滑移动到目标角度 ----
-    if (current_x < target_x) {
-        current_x = min(current_x + STEP_SIZE, target_x);
-    } else if (current_x > target_x) {
-        current_x = max(current_x - STEP_SIZE, target_x);
-    }
-    
-    if (current_y < target_y) {
-        current_y = min(current_y + STEP_SIZE, target_y);
-    } else if (current_y > target_y) {
-        current_y = max(current_y - STEP_SIZE, target_y);
-    }
-    
-    servo_x.write(current_x);
-    servo_y.write(current_y);
-    
-    delay(INTERVAL_MS);
-}
-
-// ====== 指令解析 ======
-void process_command(String cmd) {
-    cmd.trim();
-    
-    // ---- 回中 ----
-    if (cmd == "RESET") {
-        target_x = 90;
-        target_y = 90;
-        Serial.println("OK");
-        return;
-    }
-    
-    // ---- 急停 ----
-    if (cmd == "STOP") {
-        // 保持当前位置不变
-        Serial.println("OK");
-        return;
-    }
-    
-    // ---- 状态查询 ----
-    if (cmd == "STATUS?") {
-        Serial.print("OK:X:");
-        Serial.print(current_x);
-        Serial.print(",Y:");
-        Serial.println(current_y);
-        return;
-    }
-    
-    // ---- 角度指令 "X:120,Y:90" ----
-    int x_pos = cmd.indexOf("X:");
-    int y_pos = cmd.indexOf("Y:");
-    
-    if (x_pos >= 0 && y_pos >= 0) {
-        int x_val = cmd.substring(x_pos + 2, y_pos - 1).toInt();
-        int y_val = cmd.substring(y_pos + 2).toInt();
-        
-        target_x = constrain(x_val, 0, 180);
-        target_y = constrain(y_val, 0, 180);
-        
-        Serial.println("OK");
-    } else {
-        Serial.println("ERROR:invalid format");
-    }
-}
+水平舵机 → PA8  (TIM1_CH1)
+俯仰舵机 → PA0  (TIM2_CH1)
+舵机电源 → 5V / GND（外部供电）
+串口     → PA2(TX) PA3(RX) → USB 转串口模块
 ```
 
 ---
 
-## 参数调优
+## 核心代码结构（main.c）
 
-| 参数 | 值 | 说明 |
-|------|-----|------|
-| `STEP_SIZE` | 2 | 每 15ms 移动角度数。越大响应越快，但可能抖动 |
-| `INTERVAL_MS` | 15 | 平滑步进间隔。越小越平滑，但舵机可能跟不赢 |
-| 波特率 | 115200 | 串口速度，确保和 Python 端一致 |
+### PID 控制器
 
-如果云台抖动：减小 `STEP_SIZE`
-如果云台迟钝：增大 `STEP_SIZE`
+```c
+// PID 结构体
+typedef struct {
+    float Kp, Ki, Kd;       // PID 参数
+    float integral;         // 积分项
+    float prev_error;       // 上一次误差（微分用）
+    float output_limit;     // 输出限幅
+    float integral_limit;   // 积分限幅（抗饱和）
+} PID_t;
+
+// 初始化
+void PID_Init(PID_t *pid, float Kp, float Ki, float Kd, float limit);
+
+// 计算：输入误差，输出角度调整量
+float PID_Compute(PID_t *pid, float error, float dt);
+```
+
+### 串口协议解析
+
+```
+格式: "error_x,error_y\n"
+      error_x — 水平误差（可正可负）
+      error_y — 俯仰误差（可正可负）
+      用 sscanf(line, "%d,%d", &e1, &e2) 解析
+```
+
+### 舵机 PWM
+
+```
+TIM 时钟: 72MHz / 720 prescaler = 100kHz
+PWM 周期: 2000 ticks = 20ms = 50Hz
+角度→脉宽: pulse = 50 + angle × 200/180
+  0°   → 500μs  → 50  ticks
+  90°  → 1500μs → 150 ticks
+  180° → 2500μs → 250 ticks
+```
+
+### 主循环流程
+
+```
+每个 10ms 周期:
+  1. 计算 dt = 距上次运算的时间差
+  2. 如果收到新误差数据:
+     a. 关中断读取 error_x, error_y
+     b. PID_Compute(&pid_x, error_x, dt)
+     c. PID_Compute(&pid_y, error_y, dt)
+     d. 累积更新 servo_angle_x/y
+     e. 限幅到 0-180°
+     f. 设置 PWM 脉宽
+  3. HAL_Delay(10)
+```
+
+---
+
+## PID 参数调优
+
+| 参数 | 默认值 | 作用 | 调大 | 调小 |
+|------|--------|------|------|------|
+| `Kp` | 1.0 | 比例 — 立即响应误差 | 反应快，可能超调 | 反应慢，更稳定 |
+| `Ki` | 0.1 | 积分 — 消除稳态误差 | 静差消除快，易饱和 | 可能有残留静差 |
+| `Kd` | 0.05 | 微分 — 抑制震荡 | 过冲抑制好，怕噪声 | 可能震荡 |
+| `output_limit` | 5.0 | 每周期最大角度调整量 | 跟踪快，可能抖动 | 平滑但跟踪慢 |
+
+### 调试建议
+
+- **云台抖动/震荡** → 减小 `Kp` 或 `Kd`，增大 `output_limit`
+- **跟踪太慢/滞后** → 增大 `Kp`，增大 `output_limit`
+- **无法对准中心（有静差）** → 增大 `Ki`
+- **积分饱和（回中过头）** → 减小 `Ki`，检查 `integral_limit`
+
+---
+
+## 文件位置
+
+```
+yuntai/
+├── Core/
+│   ├── Inc/main.h         ← 头文件
+│   └── Src/main.c         ← PID 控制 + 串口接收 ← 主要修改文件
+│   └── Src/stm32f1xx_hal_msp.c  ← GPIO/TIM/UART MSP 初始化
+├── Drivers/                ← HAL 库
+└── yuntai.ioc              ← CubeMX 工程
+```

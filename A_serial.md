@@ -1,157 +1,106 @@
-# A — 串口通信模块
+# A — 串口通信模块（PID 云台版）
 
-> 负责把鼠标位移换算成的角度值，通过串口发给单片机控制舵机云台。
+> 将视觉/鼠标追踪的**误差值**通过串口发送给单片机，由单片机内置的 **PID 控制器**自动调整云台舵机角度。
+
+---
+
+## 架构概览
+
+```
+PC 端 (A_serial.py)                     MCU 端 (main.c)
+┌──────────────────────┐               ┌──────────────────────────┐
+│ 视觉/鼠标检测目标偏移   │  ──串口──►  │ 逐字节接收 → 解析行数据   │
+│  → 计算误差 dx, dy    │   error_x,   │  → PID 计算 → 更新 PWM   │
+│  → send_errors(dx,dy) │   error_y\n  │  → 舵机转动 → 减小误差   │
+└──────────────────────┘               └──────────────────────────┘
+```
+
+**核心变化：** PC 不再计算绝对角度，只发送"误差值"，PID 在 MCU 端闭环。
 
 ---
 
 ## 职责
 
 1. 打开/关闭串口
-2. 发送角度指令 `X:角度,Y:角度\n`
+2. 发送误差值 `error_x,error_y\n`（两个可正可负的整数，逗号分隔）
 3. 接收单片机返回的状态
 4. 断线重连 / 超时处理
 5. 向 `state.json` 写入串口状态
 
 ---
 
-## 串口协议（初版）
+## 串口协议（PID 版）
 
 ```
-发送: "X:120,Y:90\n"
-      X = 水平角度 (0-180)
-      Y = 俯仰角度 (0-180)
+发送: "120,-45\n"
+      第一个值 = 水平误差 (正=右, 负=左, 范围 ±999)
+      第二个值 = 俯仰误差 (正=下, 负=上, 范围 ±999)
       末尾必须加换行符 \n
 
-接收: "OK\n" 或 "ERROR:消息\n"
+      示例：
+        "50,0\n"    → 目标偏右 50 单位，水平舵机右转
+        "0,-30\n"   → 目标偏上 30 单位，俯仰舵机上转
+        "0,0\n"     → 目标已在准星中心，保持不动
 
-扩展指令:
-  "RESET\n"     → 回中
-  "STOP\n"      → 急停
-  "STATUS?\n"   → 查询状态
+接收: 当前仅单向发送，MCU 不返回响应
+      （如需扩展可增加 STATUS? 指令）
+```
+
+### 与旧版对比
+
+| 项目 | 旧版 (角度直驱) | 新版 (PID 控制) |
+|------|----------------|----------------|
+| 发送格式 | `X:120,Y:90\n` | `120,-45\n` |
+| 数值含义 | 绝对角度 (0-180) | 误差值 (±999) |
+| PID 位置 | PC 端 (软件平滑) | **MCU 端** (硬件实时) |
+| 响应速度 | 受 PC 帧率限制 | MCU 独立 100Hz 闭环 |
+| 抗干扰 | 无 | PID 积分项消除稳态误差 |
+
+---
+
+## 建议接口（A_serial.py）
+
+```python
+from A_serial import SerialController
+
+# 初始化并打开串口
+ser = SerialController()
+ser.open()
+
+# 每帧发送误差值
+# dx = 目标水平偏移（正=右）, dy = 目标垂直偏移（正=下）
+ser.send_errors(dx, dy)
+
+# 获取状态
+status = ser.get_status()  # → {"status": "OK", "msg": "connected"}
 ```
 
 ---
 
-## 建议接口
+## MCU 端 PID 参数
 
-```python
-import serial
-import serial.tools.list_ports
-import threading
-import time
+在 `main.c` 的 `/* USER CODE BEGIN 2 */` 中配置：
 
-class SerialController:
-    def __init__(self, port=None, baudrate=115200, timeout=0.1):
-        self.port = port
-        self.baudrate = baudrate
-        self.timeout = timeout
-        self.ser = None
-        self.connected = False
-        self.last_status = "disconnected"
-        self.last_msg = ""
-        self._lock = threading.Lock()
-
-    def open(self):
-        """打开串口。如果没指定端口，自动扫描。"""
-        if self.port is None:
-            self.port = self._auto_detect()
-        try:
-            self.ser = serial.Serial(
-                port=self.port,
-                baudrate=self.baudrate,
-                timeout=self.timeout
-            )
-            self.connected = True
-            self.last_status = "OK"
-            self.last_msg = "connected"
-            print(f"[Serial] 已连接: {self.port}")
-        except Exception as e:
-            self.connected = False
-            self.last_status = "ERROR"
-            self.last_msg = str(e)
-            print(f"[Serial] 连接失败: {e}")
-
-    def send_angles(self, angle_x, angle_y):
-        """发送角度指令。
-        
-        参数：
-            angle_x: 水平角度 (0-180)
-            angle_y: 俯仰角度 (0-180)
-        """
-        angle_x = max(0, min(180, int(angle_x)))
-        angle_y = max(0, min(180, int(angle_y)))
-        cmd = f"X:{angle_x},Y:{angle_y}\n"
-        self._write(cmd)
-
-    def send_command(self, cmd):
-        """发送自定义指令。"""
-        self._write(cmd + "\n")
-
-    def get_status(self):
-        """获取串口状态，供写入 state.json。"""
-        return {
-            "status": "OK" if self.connected else "ERROR",
-            "msg": self.last_msg
-        }
-
-    def close(self):
-        if self.ser and self.ser.is_open:
-            self.ser.close()
-        self.connected = False
-
-    # ---- 内部方法 ----
-
-    def _write(self, data):
-        with self._lock:
-            if not self.ser or not self.ser.is_open:
-                self.connected = False
-                self.last_status = "ERROR"
-                self.last_msg = "port closed"
-                return
-            try:
-                self.ser.write(data.encode())
-                # 非阻塞读回显
-                if self.ser.in_waiting:
-                    resp = self.ser.readline().decode().strip()
-                    if resp != "OK":
-                        self.last_msg = resp
-            except Exception as e:
-                self.connected = False
-                self.last_status = "ERROR"
-                self.last_msg = str(e)
-
-    @staticmethod
-    def _auto_detect():
-        """自动扫描 Arduino/STM32 串口。"""
-        ports = serial.tools.list_ports.comports()
-        for p in ports:
-            if "Arduino" in p.description or "STM32" in p.description \
-               or "USB Serial" in p.description:
-                return p.device
-        # 没找到已知设备，返回第一个可用串口
-        return ports[0].device if ports else None
+```c
+// Kp=1.0, Ki=0.1, Kd=0.05, 输出限幅 ±5°/周期
+PID_Init(&pid_x, 1.0f, 0.1f, 0.05f, 5.0f);
+PID_Init(&pid_y, 1.0f, 0.1f, 0.05f, 5.0f);
 ```
 
----
+| 参数 | 作用 | 调大 | 调小 |
+|------|------|------|------|
+| Kp | 比例 - 快速响应 | 反应快，可能超调 | 反应慢，更稳定 |
+| Ki | 积分 - 消除静差 | 消除稳态误差，易积分饱和 | 可能有静差 |
+| Kd | 微分 - 抑制震荡 | 抑制过冲，抗噪声差 | 可能震荡 |
+| output_limit | 每周期最大调整角度 | 跟踪快，可能抖动 | 运动平滑，跟踪慢 |
 
-## 角度映射
+### PWM 参数
 
-```python
-# 从鼠标 dx, dy 到舵机角度
-SENSITIVITY = 0.5       # 每 1 像素 dx 转 0.5 度
-ANGLE_MIN = 0
-ANGLE_MAX = 180
-
-current_angle_x = 90    # 初始居中
-current_angle_y = 90
-
-def mouse_to_angle(dx, dy):
-    global current_angle_x, current_angle_y
-    current_angle_x += dx * SENSITIVITY
-    current_angle_y += dy * SENSITIVITY
-    current_angle_x = max(ANGLE_MIN, min(ANGLE_MAX, current_angle_x))
-    current_angle_y = max(ANGLE_MIN, min(ANGLE_MAX, current_angle_y))
-    return current_angle_x, current_angle_y
+```
+TIM 频率: 72MHz / 720 prescaler = 100kHz
+PWM 周期: 2000 ticks = 20ms = 50Hz（标准舵机频率）
+角度映射: 0°=500μs(50), 90°=1500μs(150), 180°=2500μs(250)
+舵机行程: 0° ~ 180°
 ```
 
 ---

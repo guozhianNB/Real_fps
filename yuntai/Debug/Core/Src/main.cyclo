@@ -1,0 +1,12 @@
+../Core/Src/main.c:92:6:PID_Init	1
+../Core/Src/main.c:106:7:PID_Compute	5
+../Core/Src/main.c:142:6:SetServoAngle	6
+../Core/Src/main.c:153:6:ParseErrorLine	2
+../Core/Src/main.c:166:6:HAL_UART_RxCpltCallback	5
+../Core/Src/main.c:191:5:main	8
+../Core/Src/main.c:292:6:SystemClock_Config	3
+../Core/Src/main.c:329:13:MX_TIM1_Init	7
+../Core/Src/main.c:404:13:MX_TIM2_Init	6
+../Core/Src/main.c:463:13:MX_USART2_UART_Init	2
+../Core/Src/main.c:496:13:MX_GPIO_Init	1
+../Core/Src/main.c:519:6:Error_Handler	1
