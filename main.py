@@ -35,9 +35,8 @@ from pathlib import Path
 import numpy as np
 import pyee
 import cv2
-import requests
-from vision import HumanTracker, get_camera_size
-from get_camera import get_camera_size, get_camera_frame
+from vision.vision import HumanTracker, get_camera_size
+from vision.get_camera import get_camera_frame
 
 
 # -------------- 游戏状态管理 ----------------
