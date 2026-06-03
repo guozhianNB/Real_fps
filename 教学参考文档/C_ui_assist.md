@@ -894,55 +894,43 @@ class Effects:
     
     管理多个同时运行的效果（闪光、得分提示）。
     
+    ⚠️ 开火事件来源说明：
+      开火是"事件"，不走 state.json 轮询（延迟太高）。
+      改用 fire_notifier.FireListener 通过 UDP 实时接收。
+      本类提供 add_hit_flash() 方法供外部调用。
+    
     用法：
         effects = Effects()
-        effects.update(dt_ms, state)   # 在主循环中每帧调用
-        effects.render(surface)         # 在主循环中每帧调用
+        effects.update(dt_ms)          # 每帧更新动画
+        effects.render(surface)        # 每帧绘制动画
+        effects.add_hit_flash(zone)    # 外部调用：触发命中闪光
     """
     
     def __init__(self):
         self.active_effects = []  # 当前活跃的效果列表
-        
-        # 状态缓存（用于检测变化）
-        self.prev_fired = False
-        self.prev_score_delta = 0
     
-    def update(self, dt_ms, state):
-        """更新所有效果。
+    def add_hit_flash(self, hit_zone="", score_delta=0):
+        """外部调用：添加命中闪光和得分弹出。
+        
+        由 FireListener 回调或 pygame 事件处理触发。
         
         参数：
-            dt_ms: 距上一帧的毫秒数
-            state: 当前状态字典
+            hit_zone: "head" / "body" / ""
+            score_delta: 本次得分
         """
-        # ---- 1. 检测开火事件 ----
-        fire_state = state.get("fire_state", {})
-        fired = fire_state.get("fired", False)
-        
-        if fired and not self.prev_fired:
-            # 刚开火！添加命中闪光效果
-            self.active_effects.append(HitFlash())
-        
-        self.prev_fired = fired
-        
-        # ---- 2. 检测得分事件 ----
-        score_data = state.get("score", {})
-        score_delta = score_data.get("delta", 0)
-        score_reason = score_data.get("reason", "")
-        
-        if score_delta > 0 and score_delta != self.prev_score_delta:
-            # 加分了！添加得分提示
-            self.active_effects.append(ScorePopup(score_delta, score_reason))
-        
-        self.prev_score_delta = score_delta
-        
-        # ---- 3. 更新所有效果 ----
+        self.active_effects.append(HitFlash())
+        if score_delta > 0:
+            reason = "headshot" if hit_zone == "head" else "hit"
+            self.active_effects.append(ScorePopup(score_delta, reason))
+    
+    def update(self, dt_ms):
+        """更新所有效果（不再需要 state 参数，开火事件已独立）。"""
         # 把已经结束的效果移除
         still_active = []
         for effect in self.active_effects:
             effect.update(dt_ms)
             if effect.active:
                 still_active.append(effect)
-        
         self.active_effects = still_active
     
     def render(self, surface):
@@ -1089,13 +1077,14 @@ from ui.assets import get_font_small, get_font_large
 from ui.radar import Radar
 from ui.hud import HUD
 from ui.effects import Effects
+from fire_notifier import FireListener, send_fire
 
 # ==============================================
-#   模拟 JSON 写入器
+#   模拟 JSON 写入器（开火事件走 UDP，不走 state.json）
 # ==============================================
 
 class MockStateWriter:
-    """模拟主程序，定时更新 state.json。"""
+    """模拟主程序，定时更新 state.json + 通过 UDP 发送开火事件。"""
     
     def __init__(self):
         self._stop = threading.Event()
@@ -1118,44 +1107,45 @@ class MockStateWriter:
             with open("state.json", "w", encoding="utf-8") as f:
                 json.dump(scene, f, indent=2)
             
+            # ★ 场景 2（命中）时通过 UDP 发送开火事件
+            if scene_idx % len(scenes) == 2:
+                print("  → 发送 UDP 开火事件")
+                send_fire(hit_zone="head", score_delta=50)
+            
             scene_idx += 1
-            time.sleep(2.5)  # 每 2.5 秒切换一次场景
+            time.sleep(2.5)
     
     def _build_scenes(self):
         return [
             # 场景 0：空闲
             {
                 "system_state": {"mode": "idle", "msg": "等待目标"},
-                "fire_state": {"fired": False},
-                "score": {"value": 0, "delta": 0, "reason": ""},
+                "score": {"value": 0},
                 "targets": [],
                 "serial": {"status": "OK", "msg": "connected"}
             },
             # 场景 1：追踪一个目标
             {
                 "system_state": {"mode": "playing", "msg": "目标已发现"},
-                "fire_state": {"fired": False},
-                "score": {"value": 0, "delta": 0, "reason": ""},
+                "score": {"value": 0},
                 "targets": [
-                    {"id": 1, "class": "person", "conf": 0.85, "bbox": [620, 240, 780, 420], "cx": 700, "cy": 330}
+                    {"id": 1, "bbox": [620, 240, 780, 420]}
                 ],
                 "serial": {"status": "OK", "msg": "connected"}
             },
-            # 场景 2：命中
+            # 场景 2：命中（开火事件通过 UDP 发送）
             {
                 "system_state": {"mode": "playing", "msg": "命中！"},
-                "fire_state": {"fired": True},
-                "score": {"value": 50, "delta": 50, "reason": "hit"},
+                "score": {"value": 50},
                 "targets": [
-                    {"id": 1, "class": "person", "conf": 0.92, "bbox": [600, 320, 680, 400], "cx": 640, "cy": 360}
+                    {"id": 1, "bbox": [600, 320, 680, 400]}
                 ],
                 "serial": {"status": "OK", "msg": "connected"}
             },
             # 场景 3：串口断开
             {
                 "system_state": {"mode": "over", "msg": "串口连接断开"},
-                "fire_state": {"fired": False},
-                "score": {"value": 50, "delta": 0, "reason": ""},
+                "score": {"value": 50},
                 "targets": [],
                 "serial": {"status": "ERROR", "msg": "disconnected"}
             },
@@ -1204,6 +1194,16 @@ def main():
     pygame.display.set_caption("Real FPS — UI 组件自测")
     clock = pygame.time.Clock()
     
+    # ---- 初始化 FireListener（UDP 实时接收开火事件） ----
+    FIRE_EVENT_TYPE = pygame.USEREVENT + 1
+
+    def on_fire(event):
+        """FireListener 回调（后台线程）→ 转到 Pygame 主循环处理。"""
+        pygame.event.post(pygame.event.Event(FIRE_EVENT_TYPE, event))
+
+    fire_listener = FireListener(callback=on_fire)
+    fire_listener.start()
+
     # 初始化你的组件
     radar = Radar(WIDTH - RADAR_RADIUS - RADAR_MARGIN, HEIGHT - RADAR_RADIUS - RADAR_MARGIN)
     hud = HUD()
@@ -1214,17 +1214,22 @@ def main():
     
     running = True
     last_state = {}
-    last_fired = False
     
     while running:
         dt = clock.tick(FPS_TARGET)
         
-        # ---- 处理事件 ----
+        # ---- 处理事件（包括 UDP 开火事件） ----
         for event in pygame.event.get():
+            if event.type == pygame.QUIT:
                 running = False
             elif event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_ESCAPE:
                     running = False
+            elif event.type == FIRE_EVENT_TYPE:
+                # ★ 收到 UDP 开火事件！触发命中效果
+                hit_zone = event.__dict__.get("hit_zone", "")
+                score_delta = event.__dict__.get("score_delta", 0)
+                effects.add_hit_flash(hit_zone, score_delta)
         
         # ---- 读取最新状态 ----
         state = read_status()
@@ -1233,8 +1238,8 @@ def main():
         else:
             state = last_state
         
-        # ---- 更新效果 ----
-        effects.update(dt, state)
+        # ---- 更新效果（不再传 state 参数） ----
+        effects.update(dt)
         
         # ---- 绘制 ----
         screen.fill(COLOR_BLACK)
@@ -1246,15 +1251,7 @@ def main():
         
         # 渲染组件
         targets = state.get("targets", [])
-        locked_id = state.get("target_lock", {}).get("target_id")
         
-        radar.render(screen, targets, locked_target_id=locked_id, dt_ms=dt)
-        hud.render(screen, state, int(clock.get_fps()), dt)
-        effects.render(screen)
-        
-        # ---- 刷新 ----
-        pygame.display.flip()
-    
         radar.render(screen, targets, dt_ms=dt)
         hud.render(screen, state, int(clock.get_fps()), dt)
         effects.render(screen)
@@ -1264,12 +1261,13 @@ def main():
     
     # ---- 清理 ----
     writer.stop()
+    fire_listener.stop()
     pygame.quit()
     print("测试结束")
 
 
 if __name__ == "__main__":
-    main(
+    main()
 
 B 的 `core.py` 中预留了三个空位，等你把组件交给他：
 
@@ -1305,9 +1303,19 @@ self.radar.render(screen, targets, locked_target_id, dt_ms)
 # HUD
 self.hud.render(screen, state, fps, dt_ms)
 
-# 效果
-self.effects.update(dt_ms, state)
-self.effects.render(screen)
+# 效果（开火事件由 FireListener 通过 UDP 实时接收）
+from fire_notifier import FireListener
+
+def on_fire_event(event):
+    """FireListener 回调 → 触发效果"""
+    effects.add_hit_flash(event.get("hit_zone"), event.get("score_delta"))
+
+fire_listener = FireListener(callback=on_fire_event)
+fire_listener.start()
+
+# 主循环中：
+effects.update(dt_ms)       # 不再传 state 参数
+effects.render(screen)      # 正常绘制
 ```
 
 ---

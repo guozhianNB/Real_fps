@@ -3,9 +3,10 @@
 
 numpy
 
-#服务端
+#服务端+通信
 fastapi
 uvicorn
+serial
 
 pygame>=2.5.0          # UI 渲染（B 和 C 使用）
 pyee>=12.0.0           # 事件广播（D 使用）

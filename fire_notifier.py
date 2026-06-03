@@ -1,0 +1,163 @@
+"""
+开火事件实时通知模块（UDP 本地广播）。
+
+设计思路：
+  JSON 轮询适合传递"状态"（分数、目标列表、模式），
+  但开火是"事件"，需要立即通知 UI，不应被轮询周期拖慢。
+
+方案：
+  主程序开火时通过 UDP 发一个数据包到 127.0.0.1:8099，
+  UI 后台线程监听该端口，收到后立即触发动画。
+
+用法（主程序）：
+    from fire_notifier import send_fire
+
+    send_fire(hit_zone="head", score_delta=50)
+
+用法（UI）：
+    from fire_notifier import FireListener
+
+    def on_fire(event):
+        print(f"开火！{event['hit_zone']} +{event['score_delta']}")
+
+    listener = FireListener(callback=on_fire)
+    listener.start()
+"""
+
+import socket
+import json
+import threading
+import time
+
+FIRE_PORT = 8099
+FIRE_ADDR = ("127.0.0.1", FIRE_PORT)
+
+# ======================
+# 发送端（主程序使用）
+# ======================
+
+_fire_sock = None
+
+def _get_sock():
+    global _fire_sock
+    if _fire_sock is None:
+        _fire_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    return _fire_sock
+
+def send_fire(hit_zone="", score_delta=0, event_type="fire"):
+    """发送开火事件（UDP，不阻塞，fire-and-forget）。
+    
+    参数：
+        hit_zone: "head" / "body" / ""
+        score_delta: 本次得分
+        event_type: 事件类型，预留扩展
+    """
+    msg = json.dumps({
+        "event": event_type,
+        "hit_zone": hit_zone,
+        "score_delta": score_delta,
+        "timestamp": time.time(),
+    })
+    sock = _get_sock()
+    try:
+        sock.sendto(msg.encode(), FIRE_ADDR)
+    except Exception:
+        pass  # UDP 发失败无影响，UI 收不到下一帧也会知道
+
+def close_sender():
+    """关闭发送端 socket。"""
+    global _fire_sock
+    if _fire_sock:
+        try:
+            _fire_sock.close()
+        except Exception:
+            pass
+        _fire_sock = None
+
+
+# ======================
+# 接收端（UI 使用）
+# ======================
+
+class FireListener:
+    """UDP 开火事件监听器（在后台线程运行）。
+    
+    用法：
+        def on_fire(event):
+            print(f"开火！{event}")
+
+        listener = FireListener(callback=on_fire)
+        listener.start()
+        # ... 程序结束后
+        listener.stop()
+    """
+
+    def __init__(self, callback=None):
+        """
+        参数：
+            callback: 收到事件时调用的函数，参数为事件 dict
+        """
+        self.callback = callback
+        self._running = False
+        self._thread = None
+
+    def start(self):
+        """启动监听线程。"""
+        if self._running:
+            return
+        self._running = True
+        self._thread = threading.Thread(target=self._listen_loop, daemon=True)
+        self._thread.start()
+
+    def stop(self):
+        """停止监听线程。"""
+        self._running = False
+        if self._thread and self._thread.is_alive():
+            self._thread.join(timeout=1.0)
+
+    def _listen_loop(self):
+        """后台监听循环。"""
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        sock.bind(FIRE_ADDR)
+        sock.settimeout(0.5)  # 每 0.5s 醒来检查一次 running 标志
+
+        while self._running:
+            try:
+                data, _ = sock.recvfrom(4096)
+                event = json.loads(data.decode())
+                if self.callback:
+                    self.callback(event)
+            except socket.timeout:
+                continue
+            except (json.JSONDecodeError, Exception):
+                pass  # 忽略异常包
+
+        sock.close()
+
+
+# ======================
+# 独立测试
+# ======================
+
+if __name__ == "__main__":
+    print("=== fire_notifier 测试 ===")
+    print("将在后台监听，请在另一个终端运行：")
+    print('  python -c "from fire_notifier import send_fire; send_fire(\'head\', 50)"')
+    print()
+
+    def test_callback(event):
+        print(f"[收到] {event['event']} | "
+              f"部位: {event['hit_zone']} | "
+              f"得分: +{event['score_delta']}")
+
+    listener = FireListener(callback=test_callback)
+    listener.start()
+
+    try:
+        while True:
+            time.sleep(1)
+    except KeyboardInterrupt:
+        print("\n停止")
+    finally:
+        listener.stop()

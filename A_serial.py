@@ -1,6 +1,10 @@
 """
 A_serial.py — 串口通信模块
 
+⚠️ 文件名不能叫 serial.py，会和 pyserial 库冲突！
+   import serial 会找到本地文件而非 pyserial 库。
+   解决方案：命名为 A_serial.py，用 from A_serial import SerialController。
+
 职责：
   1. 打开/关闭串口
   2. 发送云台舵机误差值 "error_x,error_y\\n" 给单片机
@@ -33,6 +37,17 @@ class SerialController:
     """串口控制器，发送误差值给单片机 PID 云台。"""
 
     def __init__(self, port=None, baudrate=115200, timeout=0.05):
+        """
+        初始化串口控制器，自动扫描并打开串口。
+
+        参数：
+            port: 串口名（如 COM3），None 时自动扫描
+            baudrate: 波特率
+            timeout: 读取超时（秒）
+
+        抛出：
+            RuntimeError: 没有找到可用串口，或打开失败
+        """
         self.port = port
         self.baudrate = baudrate
         self.timeout = timeout
@@ -44,12 +59,15 @@ class SerialController:
         self._last_send_time = 0
         self._min_interval = 0.01  # 最小发送间隔 10ms
 
-    # ---- 公共接口 ----
-
-    def open(self):
-        """打开串口。如果没指定端口，自动扫描。"""
+        # ---- 初始化时自动寻找并打开串口 ----
         if self.port is None:
             self.port = self._auto_detect()
+            if self.port is None:
+                raise RuntimeError(
+                    "[Serial] 未找到可用串口！请检查设备连接。\n"
+                    "  可手动指定端口：SerialController(port='COM3')"
+                )
+
         try:
             self.ser = serial.Serial(
                 port=self.port,
@@ -59,12 +77,33 @@ class SerialController:
             self.connected = True
             self.last_status = "OK"
             self.last_msg = "connected"
-            print(f"[Serial] 已连接: {self.port}")
+            print(f"[Serial] 已连接: {self.port} @ {baudrate}bps")
+        except Exception as e:
+            raise RuntimeError(
+                f"[Serial] 打开串口 {self.port} 失败: {e}"
+            )
+
+    # ---- 公共接口 ----
+
+    def open(self):
+        """（兼容旧代码）重新打开串口。"""
+        if self.ser and self.ser.is_open:
+            self.close()
+        try:
+            self.ser = serial.Serial(
+                port=self.port,
+                baudrate=self.baudrate,
+                timeout=self.timeout,
+            )
+            self.connected = True
+            self.last_status = "OK"
+            self.last_msg = "connected"
+            print(f"[Serial] 已重连: {self.port}")
         except Exception as e:
             self.connected = False
             self.last_status = "ERROR"
             self.last_msg = str(e)
-            print(f"[Serial] 连接失败: {e}")
+            print(f"[Serial] 重连失败: {e}")
 
     def send_errors(self, error_x, error_y):
         """发送误差值给单片机。
@@ -75,9 +114,9 @@ class SerialController:
             error_x: 水平误差（像素/角度差），正=右，负=左
             error_y: 俯仰误差（像素/角度差），正=下，负=上
         """
-        # 限幅到 ±999 以保证格式紧凑
-        ex = max(-999, min(999, int(round(error_x))))
-        ey = max(-999, min(999, int(round(error_y))))
+        # 限幅到 ±2000 以保证格式紧凑
+        ex = max(-2000, min(2000, int(round(error_x))))
+        ey = max(-2000, min(2000, int(round(error_y))))
         cmd = f"{ex},{ey}\n"
         self._write(cmd)
 
@@ -155,18 +194,20 @@ def example_usage():
         1. 从视觉模块获取目标偏移 dx, dy（像素）
         2. 通过串口把偏移作为误差发送给单片机
         3. 单片机 PID 控制云台跟踪目标
+
+    注意：SerialController() 初始化时已自动打开串口，无需手动调用 open()。
     """
+    try:
+        ser = SerialController()    # ← 自动扫描并打开串口
+    except RuntimeError as e:
+        print(e)
+        return
+
     # 模拟视觉检测到的目标偏移
-    dx = 120   # 目标偏右 120 像素
-    dy = -45   # 目标偏上 45 像素
-
-    ser = SerialController()
-    ser.open()
-
-    if ser.connected:
-        ser.send_errors(dx, dy)
-        print(f"发送误差: ({dx}, {dy})")
-        ser.close()
+    dx, dy = 120, -45
+    ser.send_errors(dx, dy)
+    print(f"发送误差: ({dx}, {dy})")
+    ser.close()
 
 
 if __name__ == "__main__":

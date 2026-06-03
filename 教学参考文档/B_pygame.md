@@ -396,16 +396,19 @@ def read_status():
 
 ### 7.3 主程序会写入的 JSON 结构
 
-主程序会写一个 `state.json` 文件，格式如下（你不需要记，需要时来查）：
+主程序会写一个 `state.json` 文件，**只包含「状态」**（模式、分数、目标列表）。
+
+> ⚠️ **「事件」不走 JSON！**
+> 开火是事件，需要实时响应。如果放在 JSON 里，UI 每 50ms 轮询一次，开火动画最高延迟 50ms。
+> **解决方案：开火事件通过 UDP 本地广播实时通知 UI（详见下文 7.4 节）**
 
 ```json
 {
     "timestamp": 1717320000.0,
     "system_state": {"mode": "playing", "msg": "normal"},
-    "fire_state": {"fired": false},
-    "score": {"value": 120, "delta": 10, "reason": "hit"},
+    "score": {"value": 120},
     "targets": [
-        {"id": 3, "class": "person", "conf": 0.94, "bbox": [600, 300, 680, 420], "cx": 640, "cy": 360}
+        {"id": 3, "bbox": [600, 300, 680, 420]}
     ],
     "serial": {"status": "OK", "msg": "connected"}
 }
@@ -413,10 +416,95 @@ def read_status():
 
 各字段含义：
 - `system_state.mode`：当前状态 `idle` / `playing` / `paused` / `over`
-- `fire_state.fired`：是否刚开火（触发闪光动画）
-- `score.value`：当前分数，`score.delta`：本帧加了多少分
+- `score.value`：当前分数
 - `targets`：所有检测到的目标列表
 - `serial.status`：串口状态
+
+---
+
+### 7.4 开火事件实时通知（UDP 广播）
+
+开火事件走独立的 **UDP 本地广播**，不经过 `state.json`。
+
+```
+主程序 main.py                   你的 UI
+    │                               │
+    │ 检测到开火                     │ 后台 FireListener 线程
+    │                               │ 一直在监听端口 8099
+    │─── UDP ──→ {"event":"fire",   │
+    │            "hit_zone":"head", │ ← 收到后立即触发动画
+    │            "score_delta":50}   │
+    │                               │
+```
+
+#### 你的 UI 中怎么用
+
+```python
+from fire_notifier import FireListener
+
+class UI:
+    def __init__(self):
+        # ... 其他初始化 ...
+        
+        # 启动开火事件监听（实时接收，不轮询）
+        self.fire_listener = FireListener(callback=self._on_fire_event)
+        self.fire_listener.start()
+    
+    def _on_fire_event(self, event):
+        """收到开火事件时被自动调用（在后台线程中）。
+        
+        event 格式：
+            {"event": "fire", "hit_zone": "head", "score_delta": 50, "timestamp": ...}
+        """
+        hit_zone = event.get("hit_zone", "")     # "head" 或 "body"
+        score_delta = event.get("score_delta", 0) # 50 或 10
+        
+        # 把事件放入 Pygame 事件队列，主循环下一帧处理
+        pygame.event.post(pygame.event.Event(
+            pygame.USEREVENT + 1,  # 自定义事件
+            {"hit_zone": hit_zone, "score_delta": score_delta}
+        ))
+        
+        # 你也可以直接在这里触发效果（注意线程安全）
+        print(f"[UI] 开火！{hit_zone} +{score_delta}")
+```
+
+> 💡 **提示：** `FireListener` 的回调在**后台线程**中运行。
+> 如果你要在回调中操作 Pygame（创建 Surface、播放动画），
+> 最好通过 `pygame.event.post()` 把事件发到主循环，
+> 或者在 Effects 类中加一个线程安全的队列。
+
+#### 可以用 pygame.event.post() 把事件转到主循环
+
+```python
+# 在 UI 的 __init__ 中注册自定义事件
+FIRE_EVENT = pygame.USEREVENT + 1
+
+# 在 FireListener 回调中
+def _on_fire_event(self, event):
+    pygame.event.post(pygame.event.Event(FIRE_EVENT, event))
+
+# 在主循环的事件处理中
+for event in pygame.event.get():
+    if event.type == FIRE_EVENT:
+        # 收到开火事件！触发动画
+        hit_zone = event.__dict__.get("hit_zone", "")
+        self.effects.add_hit_flash(hit_zone)
+```
+
+#### FireListener 完整用法
+
+```python
+from fire_notifier import FireListener
+
+# 创建监听器（回调函数在后台线程执行）
+listener = FireListener(callback=my_callback)
+listener.start()   # 开始监听
+# ... 程序结束前 ...
+listener.stop()    # 停止监听
+```
+
+---
 
 ---
 
@@ -1106,12 +1194,14 @@ def demo_loop():
     print("每 3 秒切换一次状态场景")
     print("按 Ctrl+C 停止\n")
     
+        # ---- 引入开火事件发送器 ----
+    from fire_notifier import send_fire
+
     # 场景 1：空闲（没有目标）
     scene_idle = {
         "timestamp": time.time(),
         "system_state": {"mode": "idle", "msg": "等待目标"},
-        "fire_state": {"fired": False},
-        "score": {"value": 0, "delta": 0, "reason": ""},
+        "score": {"value": 0},
         "targets": [],
         "serial": {"status": "OK", "msg": "connected"}
     }
@@ -1120,22 +1210,20 @@ def demo_loop():
     scene_tracking = {
         "timestamp": time.time(),
         "system_state": {"mode": "playing", "msg": "目标已发现"},
-        "fire_state": {"fired": False},
-        "score": {"value": 0, "delta": 0, "reason": ""},
+        "score": {"value": 0},
         "targets": [
-            {"id": 1, "class": "person", "conf": 0.85, "bbox": [580, 300, 700, 420], "cx": 640, "cy": 360}
+            {"id": 1, "bbox": [580, 300, 700, 420]}
         ],
         "serial": {"status": "OK", "msg": "connected"}
     }
     
-    # 场景 3：开火命中
+    # 场景 3：开火命中（通过 UDP 发送事件，不写在 JSON 里）
     scene_firing = {
         "timestamp": time.time(),
         "system_state": {"mode": "playing", "msg": "命中！"},
-        "fire_state": {"fired": True},
-        "score": {"value": 50, "delta": 50, "reason": "hit"},
+        "score": {"value": 50},
         "targets": [
-            {"id": 1, "class": "person", "conf": 0.94, "bbox": [610, 310, 670, 390], "cx": 640, "cy": 350}
+            {"id": 1, "bbox": [610, 310, 670, 390]}
         ],
         "serial": {"status": "OK", "msg": "connected"}
     }
@@ -1144,8 +1232,7 @@ def demo_loop():
     scene_error = {
         "timestamp": time.time(),
         "system_state": {"mode": "over", "msg": "串口连接断开"},
-        "fire_state": {"fired": False},
-        "score": {"value": 50, "delta": 0, "reason": ""},
+        "score": {"value": 50},
         "targets": [],
         "serial": {"status": "ERROR", "msg": "disconnected"}
     }
@@ -1159,7 +1246,13 @@ def demo_loop():
                 print(f"  场景 {i+1}: {scene_names[i]}")
                 scene["timestamp"] = time.time()
                 write_status(scene)
-                time.sleep(3)  # 每个场景持续 3 秒
+                
+                # ★ 场景 3 时通过 UDP 发送开火事件，模拟主程序
+                if i == 2:
+                    print("  → 发送 UDP 开火事件")
+                    send_fire(hit_zone="head", score_delta=50)
+                
+                time.sleep(3)
     except KeyboardInterrupt:
         print("\nDemo Emitter 已停止")
 

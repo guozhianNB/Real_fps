@@ -99,31 +99,23 @@ ml.emitter.on("GAME_OVER", self.on_game_over)
 ```json
 {
     "timestamp": 1717320000.0,
-    "system_state": { "mode": "tracking", "msg": "normal" },
-    "aim_state": { "on_target": true, "hit_zone": "body", "target_id": 3, "conf": 0.94 },
-    "fire_state": { "ready": true, "fired": false, "cooldown_ms": 0 },
-    "target_lock": { "locked": true, "target_id": 3, "cx": 640, "cy": 360, "distance": 18.2 },
-    "score": { "value": 120, "delta": 10, "reason": "headshot" },
+    "system_state": {"mode": "playing", "msg": "normal"},
+    "fire_state": {"fired": false},
+    "score": {"value": 120, "delta": 10, "reason": "hit"},
     "targets": [
-        { "id": 3, "class": "person", "conf": 0.94, "bbox": [600, 300, 680, 420], "cx": 640, "cy": 360 }
+        {"id": 3, "class": "person", "conf": 0.94, "bbox": [600, 300, 680, 420], "cx": 640, "cy": 360}
     ],
-    "serial": { "status": "OK", "msg": "connected" }
+    "serial": {"status": "OK", "msg": "connected"}
 }
 ```
 
-各字段计算逻辑：
+各字段含义：
+- `system_state.mode`：当前状态 `idle` / `playing` / `paused` / `over`
+- `fire_state.fired`：是否刚开火（触发闪光动画）
+- `score.value`：当前分数，`score.delta`：本帧加了多少分
+- `targets`：所有检测到的目标列表
+- `serial.status`：串口状态
 
-| 字段 | 谁提供 | 计算方式 |
-|------|--------|----------|
-| `system_state.mode` | 你 | 状态机当前状态 |
-| `aim_state.on_target` | 你 | 目标中心与准星距离 < 阈值 |
-| `aim_state.hit_zone` | 你 | 目标 bbox 上 1/3 = head，否则 body |
-| `fire_state.ready` | 你 | 锁定且冷却结束 |
-| `fire_state.fired` | 你 | left_click 为 True 且 ready |
-| `target_lock.locked` | 你 | 同一目标连续 tracking > N 帧 |
-| `score` | 你 | fired 时 +10（body）/+50（head） |
-| `targets` | Vision | YOLO 输出 |
-| `serial` | 你 | 串口最后通信状态 |
 
 ---
 
