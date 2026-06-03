@@ -52,7 +52,7 @@ import time
 import sys
 import pyee
 from vision.vision import HumanTracker, get_camera_size
-from fire_notifier import send_fire, close_sender
+from fire_notifier import send_fire, send_kill, close_sender, ReloadDoneListener, close_reload_sender
 from A_serial import SerialController
 from mouse import MouseListener
 
@@ -88,7 +88,7 @@ MODE_OVER = "over"
 
 def write_state(system_state, score_value=0,
                 targets=None, serial_status="OK", serial_msg="connected",
-                camera_size=None):
+                camera_size=None, ammo=0):
     """写入 state.json。开火事件已独立到 UDP，不在此传递。"""
     state = {
         "timestamp": time.time(),
@@ -97,6 +97,7 @@ def write_state(system_state, score_value=0,
         "targets": targets or [],
         "camera_size": camera_size or [0, 0],
         "serial": {"status": serial_status, "msg": serial_msg},
+        "ammo": ammo,
     }
     try:
         with open(STATE_FILE, "w", encoding="utf-8") as f:
@@ -165,7 +166,9 @@ def main():
         smooth_window=3, center_lock=True,
     )
     game_running = True
-    current_mode = MODE_PLAYING  # 初始为 playing
+    current_mode = MODE_PLAYING
+    reloading = False
+    ammo = 30
 
     # 1e. 游戏状态机 —— 统一管理状态转换
     emitter = pyee.EventEmitter()
@@ -204,6 +207,24 @@ def main():
     ml.emitter.on("GAME_PAUSE", lambda: emitter.emit("GAME_PAUSE"))
     ml.emitter.on("GAME_CONTINUE", lambda: emitter.emit("GAME_CONTINUE"))
     ml.emitter.on("GAME_OVER", lambda: emitter.emit("GAME_OVER"))
+    ml.emitter.on("GAME_INSPECT", lambda: send_fire(event_type="inspect"))
+
+    def on_reload():
+        nonlocal reloading
+        if not reloading:
+            reloading = True
+            print("[换弹] 开始换弹...")
+            send_fire(event_type="reload_start")
+    ml.emitter.on("GAME_RELOAD", on_reload)
+
+    # 监听 UI 换弹完成信号
+    def on_reload_done(event):
+        nonlocal reloading, ammo
+        reloading = False
+        ammo = 30
+        print(f"[换弹] 完成，弹药: {ammo}")
+    reload_listener = ReloadDoneListener(callback=on_reload_done)
+    reload_listener.start()
 
     # 发射 GAME_START（所有模块就绪）
     emitter.emit("GAME_START")
@@ -212,10 +233,12 @@ def main():
     # ===================== 2. 主循环 =====================
 
     print("[状态] 进入主循环（显示由 Pygame UI 独立渲染）")
-    print("  按键:  P=暂停/继续  Esc=退出  Ctrl+C=强制退出")
+    print("  按键:  P=暂停/继续  Esc=退出  R=换弹  Ctrl+C=强制退出")
 
     score_value = 0
     last_hit_time = 0
+    ammo = 30
+    blacklist = set()  # 已击杀目标 ID 黑名单
 
     try:
         while game_running:
@@ -227,48 +250,46 @@ def main():
             # ---- 2b. 视觉分析 ----
             data = tracker.get_analysis(aim_point)
 
-            # ---- 2c. 开火检测 ----
-            on_target = (
-                data["num"] > 0
-                and (len(data["aim"]["head"]) > 0 or len(data["aim"]["body"]) > 0)
-            )
-            # 左键按下 + 准星指向目标 → 开火
-            if left_pressed and (now_ms - last_hit_time) >= FIRE_COOLDOWN_MS:
-                last_hit_time = now_ms
-                v_y += 10               #模拟后坐力
+            # 过滤黑名单：只保留未击杀的目标
+            alive_head = [tid for tid in data["aim"]["head"] if tid not in blacklist]
+            alive_body = [tid for tid in data["aim"]["body"] if tid not in blacklist]
 
+            # ---- 2c. 开火检测 ----
+            on_target = data["num"] > 0 and (len(alive_head) > 0 or len(alive_body) > 0)
+            # 左键按下 + 准星指向目标 → 开火
+            if not reloading and ammo and left_pressed and (now_ms - last_hit_time) >= FIRE_COOLDOWN_MS:
+                last_hit_time = now_ms
+                v_y += 10
+                ammo -= 1
                 if on_target:
-                    if len(data["aim"]["head"]) > 0:
+                    if len(alive_head) > 0:
                         hit_zone = "head"
                         score_delta = 50
+                        killed_id = alive_head[0]
                     else:
                         hit_zone = "body"
                         score_delta = 10
+                        killed_id = alive_body[0]
 
                     score_value += score_delta
-                    print(f"[击中] {hit_zone}  +{score_delta}  总分:{score_value}")
+                    blacklist.add(killed_id)
+                    print(f"[击杀] 目标#{killed_id} {hit_zone} +{score_delta}")
 
-                    # UDP 实时通知 UI
                     send_fire(hit_zone=hit_zone, score_delta=score_delta)
+                    send_kill(hit_zone=hit_zone, score_delta=score_delta, target_id=killed_id)
                 else:
                     # 左键按下 + 没有击中 → 开火，但不加分（可用于训练瞄准）
                     print("[开火] 未击中目标")
                     send_fire(hit_zone=None, score_delta=0)
 
-            # ---- 2d. 目标列表（用于写入 state.json） ----
+            # ---- 2d. 目标列表（写入 state.json，阵亡含 dead 标记） ----
             targets_json = []
             for tid_str, box_data in data["box"].items():
-                # box_data[0] = 头部矩形 [x1,y1,x2,y2]
-                # box_data[1] = 身体四边形 [[左肩],[右肩],[右胯],[左胯]]
+                tid = int(tid_str)
                 head_rect = box_data[0]
                 body_quad = box_data[1]
-
-                # 目标中心（用于 B-scope 方位）
                 cx = (head_rect[0] + head_rect[2]) // 2
                 cy = (head_rect[1] + head_rect[3]) // 2
-
-                # 深度：左右肩中点到鼻子（头框中心）的距离
-                # 越大表示目标离摄像头越近
                 shoulder_mid_x = (body_quad[0][0] + body_quad[1][0]) / 2
                 shoulder_mid_y = (body_quad[0][1] + body_quad[1][1]) / 2
                 nose_x = (head_rect[0] + head_rect[2]) / 2
@@ -277,13 +298,13 @@ def main():
                     (shoulder_mid_x - nose_x) ** 2 +
                     (shoulder_mid_y - nose_y) ** 2
                 )
-
                 targets_json.append({
-                    "id": int(tid_str),
+                    "id": tid,
                     "bbox": head_rect,
                     "cx": cx,
                     "cy": cy,
                     "depth": round(depth, 1),
+                    "dead": tid in blacklist,
                 })
 
             # ---- 2e. 串口状态 ----
@@ -305,6 +326,7 @@ def main():
                 serial_status=ser_status,
                 serial_msg=ser_msg,
                 camera_size=(cam_w, cam_h),
+                ammo=ammo,
             )
 
             # ---- 2g. 视角控制（鼠标位移 → 云台角度） ----
@@ -326,6 +348,8 @@ def main():
             serial.close()
         tracker.release()
         close_sender()
+        close_reload_sender()
+        reload_listener.stop()
         print("[退出] 程序已终止")
 
 

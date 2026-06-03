@@ -1,7 +1,16 @@
 # ui/assets.py — 资源工具
 # 字体缓存、半透明画板工具
 
+import os
 import pygame
+
+# ====== 中文字体（全局生效） ======
+_CN_FONT_PATH = None
+for _p in ["C:/Windows/Fonts/msyh.ttc", "C:/Windows/Fonts/simhei.ttf",
+           "C:/Windows/Fonts/yahei.ttf"]:
+    if os.path.exists(_p):
+        _CN_FONT_PATH = _p
+        break
 
 # ====== 字体缓存 ======
 _font_cache = {}
@@ -10,7 +19,10 @@ def get_font(size, bold=False):
     """获取指定大小的字体（带缓存）。"""
     key = (size, bold)
     if key not in _font_cache:
-        font = pygame.font.Font(None, size)
+        if _CN_FONT_PATH:
+            font = pygame.font.Font(_CN_FONT_PATH, size)
+        else:
+            font = pygame.font.Font(None, size)
         font.set_bold(bold)
         _font_cache[key] = font
     return _font_cache[key]

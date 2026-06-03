@@ -35,6 +35,7 @@ class HUD:
         targets = state.get("targets", [])
         mode = state.get("system_state", {}).get("mode", "idle")
         serial = state.get("serial", {}).get("status", "N/A")
+        ammo = state.get("ammo", 0)
 
         # ---- 分数变化闪烁 ----
         if score != self.last_score:
@@ -45,21 +46,26 @@ class HUD:
         self.flash_timer = max(0, self.flash_timer - dt_ms)
 
         # ---- 半透明背景 ----
-        panel = alpha_surface(250, 120, COLOR_BLACK, HUD_BG_ALPHA)
+        panel = alpha_surface(250, 155, COLOR_BLACK, HUD_BG_ALPHA)
         surface.blit(panel, (HUD_MARGIN - 5, HUD_MARGIN - 5))
 
         # ---- 分数 ----
         surf = self.font_large.render(f"SCORE: {score}", True, score_color)
         surface.blit(surf, (HUD_MARGIN, HUD_MARGIN))
 
+        # ---- 弹药（低于 10 时变红警告） ----
+        ammo_color = COLOR_RED if ammo < 10 else COLOR_WHITE
+        surf = self.font_small.render(f"AMMO: {ammo}", True, ammo_color)
+        surface.blit(surf, (HUD_MARGIN, HUD_MARGIN + 45))
+
         # ---- 目标数 ----
         surf = self.font_small.render(f"TARGETS: {len(targets)}", True, COLOR_WHITE)
-        surface.blit(surf, (HUD_MARGIN, HUD_MARGIN + 45))
+        surface.blit(surf, (HUD_MARGIN, HUD_MARGIN + 75))
 
         # ---- FPS（<30 时变黄警告） ----
         fps_color = COLOR_YELLOW if fps < 30 else COLOR_WHITE
         surf = self.font_small.render(f"FPS: {fps}", True, fps_color)
-        surface.blit(surf, (HUD_MARGIN, HUD_MARGIN + 75))
+        surface.blit(surf, (HUD_MARGIN, HUD_MARGIN + 105))
 
         # ---- 底部状态栏（模式 + 串口） ----
         text = f"MODE: {mode.upper()}  |  SERIAL: {serial}"

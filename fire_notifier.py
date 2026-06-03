@@ -31,6 +31,8 @@ import time
 
 FIRE_PORT = 8099
 FIRE_ADDR = ("127.0.0.1", FIRE_PORT)
+RELOAD_DONE_PORT = 8098
+RELOAD_DONE_ADDR = ("127.0.0.1", RELOAD_DONE_PORT)
 
 # ======================
 # 发送端（主程序使用）
@@ -63,6 +65,20 @@ def send_fire(hit_zone="", score_delta=0, event_type="fire"):
         sock.sendto(msg.encode(), FIRE_ADDR)
     except Exception:
         pass  # UDP 发失败无影响，UI 收不到下一帧也会知道
+
+def send_kill(hit_zone="", score_delta=0, target_id=0):
+    """发送击杀事件。"""
+    msg = json.dumps({
+        "event": "kill",
+        "hit_zone": hit_zone,
+        "score_delta": score_delta,
+        "target_id": target_id,
+        "timestamp": time.time(),
+    })
+    try:
+        _get_sock().sendto(msg.encode(), FIRE_ADDR)
+    except Exception:
+        pass
 
 def close_sender():
     """关闭发送端 socket。"""
@@ -133,6 +149,76 @@ class FireListener:
             except (json.JSONDecodeError, Exception):
                 pass  # 忽略异常包
 
+        sock.close()
+
+
+# ======================
+# 换弹完成 → 发送端（UI 使用）
+# ======================
+
+_reload_sock = None
+
+def _get_reload_sock():
+    global _reload_sock
+    if _reload_sock is None:
+        _reload_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    return _reload_sock
+
+def send_reload_done():
+    """UI 通知主程序：换弹动画播放完毕。"""
+    msg = json.dumps({"event": "reload_done", "timestamp": time.time()})
+    try:
+        _get_reload_sock().sendto(msg.encode(), RELOAD_DONE_ADDR)
+    except Exception:
+        pass
+
+def close_reload_sender():
+    global _reload_sock
+    if _reload_sock:
+        try: _reload_sock.close()
+        except: pass
+        _reload_sock = None
+
+
+# ======================
+# 换弹完成 → 接收端（主程序使用）
+# ======================
+
+class ReloadDoneListener:
+    """监听 UI 发回的换弹完成信号。"""
+
+    def __init__(self, callback=None):
+        self.callback = callback
+        self._running = False
+        self._thread = None
+
+    def start(self):
+        if self._running:
+            return
+        self._running = True
+        self._thread = threading.Thread(target=self._listen, daemon=True)
+        self._thread.start()
+
+    def stop(self):
+        self._running = False
+        if self._thread and self._thread.is_alive():
+            self._thread.join(timeout=1.0)
+
+    def _listen(self):
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        sock.bind(RELOAD_DONE_ADDR)
+        sock.settimeout(0.5)
+        while self._running:
+            try:
+                data, _ = sock.recvfrom(4096)
+                event = json.loads(data.decode())
+                if self.callback:
+                    self.callback(event)
+            except socket.timeout:
+                continue
+            except Exception:
+                pass
         sock.close()
 
 

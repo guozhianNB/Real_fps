@@ -25,10 +25,14 @@ from ui.radar import Radar
 from ui.hud import HUD
 from ui.effects import Effects
 from ui.gun_view import GunView
+from ui.kill_feed import KillFeed
 
 STATUS_FILE = "state.json"
-FIRE_EVENT = pygame.USEREVENT + 1   # UDP 开火事件的自定义编号
-CAMERA_TIMEOUT = 1.0                # 摄像头 HTTP 请求超时
+FIRE_EVENT = pygame.USEREVENT + 1
+INSPECT_EVENT = pygame.USEREVENT + 2
+RELOAD_EVENT = pygame.USEREVENT + 3
+KILL_EVENT = pygame.USEREVENT + 4
+CAMERA_TIMEOUT = 1.0
 
 
 class UI:
@@ -53,10 +57,17 @@ class UI:
         self.gun_surf = None
         self.gun_frames = []
         self.gun_muzzle_frames = []
+        self.gun_inspect_frames = []
         self._gun_breath = 0.0
         self._recoil_timer = 0.0
         self._recoil_duration = 500.0
         self._muzzle_timer = 0.0
+        self._inspect_phase = 0
+        self._inspect_timer = 0.0
+        self._reload_phase = 0
+        self._reload_timer = 0.0
+        self.gun_reload_frames = []
+        self.kill_feed = KillFeed()
 
         print("[UI] 初始化完成，准备起飞 🚀")
 
@@ -103,11 +114,19 @@ class UI:
         t.start()
 
     def _start_fire_listener(self):
-        """后台：UDP 监听开火事件"""
+        """后台：UDP 监听开火/验视/换弹事件"""
         from fire_notifier import FireListener
 
         def on_fire(event):
-            pygame.event.post(pygame.event.Event(FIRE_EVENT, event))
+            ev = event.get("event")
+            if ev == "inspect":
+                pygame.event.post(pygame.event.Event(INSPECT_EVENT, event))
+            elif ev == "reload_start":
+                pygame.event.post(pygame.event.Event(RELOAD_EVENT, event))
+            elif ev == "kill":
+                pygame.event.post(pygame.event.Event(KILL_EVENT, event))
+            else:
+                pygame.event.post(pygame.event.Event(FIRE_EVENT, event))
 
         self._fire_listener = FireListener(callback=on_fire)
         self._fire_listener.start()
@@ -130,19 +149,19 @@ class UI:
         self._gun_breath = 0.0
         self._recoil_timer = 0.0
         self._recoil_duration = 500.0
-        self._gun_w = int(self._wh * 0.65)   # 自适应：宽 = 65% 屏幕高
+        self._gun_w = int(self._wh * 0.9)   # 自适应：宽 = 90% 屏幕高（留足验视空间）
         self._gun_h = self._gun_w
         try:
             _old = pygame.display.set_mode((self._gun_w, self._gun_h),
                                            pygame.OPENGL | pygame.HIDDEN)
             gv = GunView(self._gun_w, self._gun_h,
                          model_path="ui/models/gun.obj",
-                         cam_dist=2.5, cam_pitch=-10, cam_yaw=5)
+                         cam_dist=4, cam_pitch=-8, cam_yaw=5)
 
-            # 预渲染枪械动画帧 + 对应枪口火焰帧
+            # 预渲染: 后坐力动画帧 + 枪口火焰帧
             NUM_FRAMES = 10
-            recoil_dist, recoil_pitch = 2.2, -6
-            normal_dist, normal_pitch = 2.5, -10
+            recoil_dist, recoil_pitch = 3.7, -4
+            normal_dist, normal_pitch = 4.0, -8
             self.gun_surf = gv.render(0)
             self.gun_muzzle_frames = []
             for i in range(NUM_FRAMES):
@@ -155,10 +174,50 @@ class UI:
                 self.gun_frames.append(gv.render(0))
                 self.gun_muzzle_frames.append(gv.render(0, muzzle=True))
 
+            # 预渲染: 验视动画帧（转横→持住→归位）
+            INSPECT_FRAMES = 30  # 每段各 5+20+5
+            inspect_dist, inspect_pitch, inspect_yaw = 6.0, -8, 85
+            for i in range(INSPECT_FRAMES):
+                t = i / (INSPECT_FRAMES - 1)
+                if t < 1/6:       # Phase 1: 转入 (0→1/6)
+                    pt = t * 6
+                    ease = 1 - (1 - pt) ** 2
+                elif t < 5/6:     # Phase 2: 持住 (1/6→5/6)
+                    ease = 1.0
+                else:             # Phase 3: 转回 (5/6→1)
+                    pt = (t - 5/6) * 6
+                    ease = 1 - pt ** 2  # 从1→0，验视→正常
+                d = normal_dist + (inspect_dist - normal_dist) * ease
+                p = normal_pitch + (inspect_pitch - normal_pitch) * ease
+                y = 5 + (inspect_yaw - 5) * ease
+                gv.cam_dist = d
+                gv.cam_pitch = p
+                gv.cam_yaw = y
+                self.gun_inspect_frames.append(gv.render(0))
+
+            # 预渲染: 换弹动画帧（抬枪口30°→右转20°→持→恢复）
+            reload_pitch, reload_yaw = 22, 25
+            RELOAD_FRAMES = 15
+            for i in range(RELOAD_FRAMES):
+                t = i / (RELOAD_FRAMES - 1)
+                if t < 1/3:       # 转入
+                    pt = t * 3
+                    ease = 1 - (1 - pt) ** 2
+                elif t < 2/3:     # 持住
+                    ease = 1.0
+                else:             # 转回
+                    pt = (t - 2/3) * 3
+                    ease = 1 - pt ** 2
+                p = normal_pitch + (reload_pitch - normal_pitch) * ease
+                y = 5 + (reload_yaw - 5) * ease
+                gv.cam_pitch = p
+                gv.cam_yaw = y
+                self.gun_reload_frames.append(gv.render(0))
+
             gv.cleanup()
             pygame.display.quit()
             pygame.display.init()
-            print(f"[枪械] 预渲染 {NUM_FRAMES} 帧动画, 尺寸 {self._gun_w}x{self._gun_h}")
+            print(f"[枪械] 后坐力{NUM_FRAMES}帧 + 验视{INSPECT_FRAMES}帧 + 换弹{RELOAD_FRAMES}帧")
         except Exception as e:
             print(f"[枪械] 预渲染失败: {e}")
 
@@ -204,10 +263,24 @@ class UI:
                 elif e.type == FIRE_EVENT:
                     self._recoil_timer = self._recoil_duration
                     self._muzzle_timer = 80.0
+                    self._inspect_phase = 0  # 开火打断验视
                     if self.effects:
                         self.effects.add_hit_flash(
                             e.__dict__.get("hit_zone", ""),
                             e.__dict__.get("score_delta", 0))
+                elif e.type == INSPECT_EVENT:
+                    if self._inspect_phase == 0:
+                        self._inspect_phase = 1
+                        self._inspect_timer = 0.0
+                elif e.type == RELOAD_EVENT:
+                    if self._reload_phase == 0:
+                        self._reload_phase = 1
+                        self._reload_timer = 0.0
+                elif e.type == KILL_EVENT:
+                    self.kill_feed.add_kill(
+                        e.__dict__.get("hit_zone", ""),
+                        e.__dict__.get("score_delta", 0),
+                        e.__dict__.get("target_id", 0))
 
             try:
                 while True:
@@ -232,6 +305,33 @@ class UI:
                 self._recoil_timer = max(0, self._recoil_timer - dt_ms)
             if self._muzzle_timer > 0:
                 self._muzzle_timer = max(0, self._muzzle_timer - dt_ms)
+            # 验视状态机
+            if self._inspect_phase > 0:
+                self._inspect_timer += dt_ms
+                if self._inspect_phase == 1 and self._inspect_timer > 500:
+                    self._inspect_phase = 2
+                    self._inspect_timer = 0
+                elif self._inspect_phase == 2 and self._inspect_timer > 2000:
+                    self._inspect_phase = 3
+                    self._inspect_timer = 0
+                elif self._inspect_phase == 3 and self._inspect_timer > 500:
+                    self._inspect_phase = 0
+                    self._inspect_timer = 0
+            # 换弹状态机
+            if self._reload_phase > 0:
+                self._reload_timer += dt_ms
+                if self._reload_phase == 1 and self._reload_timer > 500:
+                    self._reload_phase = 2
+                    self._reload_timer = 0
+                elif self._reload_phase == 2 and self._reload_timer > 500:
+                    self._reload_phase = 3
+                    self._reload_timer = 0
+                elif self._reload_phase == 3 and self._reload_timer > 500:
+                    self._reload_phase = 0
+                    self._reload_timer = 0
+                    from fire_notifier import send_reload_done
+                    send_reload_done()
+            self.kill_feed.update(dt_ms)
             self._render(dt_ms)
             pygame.display.flip()
             self.clock.tick(FPS_TARGET)
@@ -257,13 +357,22 @@ class UI:
         sx = self._ww / cs[0] if cs and len(cs) == 2 and cs[0] > 0 else 1.0
         sy = self._wh / cs[1] if cs and len(cs) == 2 and cs[1] > 0 else 1.0
 
-        # 目标框
+        # 目标框（存活=绿框，阵亡=半透明红叉）
         for t in st.get("targets", []):
             b = t.get("bbox")
-            if b and len(b) == 4:
-                r = pygame.Rect(int(b[0]*sx), int(b[1]*sy),
-                                int((b[2]-b[0])*sx), int((b[3]-b[1])*sy))
-                pygame.draw.rect(s, COLOR_GREEN, r, 2)
+            if not b or len(b) != 4:
+                continue
+            x1, y1, x2, y2 = int(b[0]*sx), int(b[1]*sy), int(b[2]*sx), int(b[3]*sy)
+            if t.get("dead"):
+                # 阵亡：半透明红叉
+                w, h = x2 - x1, y2 - y1
+                over = pygame.Surface((w, h), pygame.SRCALPHA)
+                pygame.draw.line(over, (255, 50, 50, 100), (0, 0), (w, h), 3)
+                pygame.draw.line(over, (255, 50, 50, 100), (w, 0), (0, h), 3)
+                s.blit(over, (x1, y1))
+            else:
+                # 存活：绿色框
+                pygame.draw.rect(s, COLOR_GREEN, (x1, y1, x2 - x1, y2 - y1), 2)
 
         # 准星
         cx, cy = self._ww // 2, self._wh // 2
@@ -299,18 +408,48 @@ class UI:
         if self.effects:
             self.effects.render(s)
 
-        # 枪械（右下角贴边，后坐力逐帧动画）
+        # 枪械（右下角贴边，后坐力/验视逐帧动画）
         if self.gun_surf is not None:
             self._gun_breath += dt_ms
             off = np.sin(self._gun_breath * 0.0025) * 3
-            gx = self._ww - self._gun_w
-            gy = self._wh - self._gun_h + off
-            if self._recoil_timer > 0 and self.gun_frames:
+            gx = self._ww - self._gun_w + 30
+            gy = self._wh - self._gun_h + 30 + off
+
+            if self._inspect_phase > 0 and self.gun_inspect_frames:
+                # 验视动画
+                total = self._inspect_timer
+                phase = self._inspect_phase
+                idx = 0
+                n = len(self.gun_inspect_frames)
+                if phase == 1:
+                    idx = int((total / 500) * (n // 6))
+                elif phase == 2:
+                    idx = n // 6 + int((total / 2000) * (n * 4 // 6))
+                elif phase == 3:
+                    idx = n * 5 // 6 + int((total / 500) * (n // 6))
+                idx = max(0, min(n - 1, idx))
+                # 验视时窗口向左上偏移，呼吸幅度更大
+                inspect_breath = np.sin(self._gun_breath * 0.003) * 5
+                s.blit(self.gun_inspect_frames[idx],
+                       (gx - 60, gy - 80 + inspect_breath))
+            elif self._reload_phase > 0 and self.gun_reload_frames:
+                total = self._reload_timer
+                phase = self._reload_phase
+                n = len(self.gun_reload_frames)
+                third = n // 3
+                if phase == 1:
+                    idx = int((total / 500) * third)
+                elif phase == 2:
+                    idx = third + int((total / 500) * third)
+                else:
+                    idx = third * 2 + int((total / 500) * third)
+                idx = max(0, min(n - 1, idx))
+                s.blit(self.gun_reload_frames[idx], (gx, gy))
+            elif self._recoil_timer > 0 and self.gun_frames:
                 t = self._recoil_timer / self._recoil_duration
                 idx = int((1 - t) * (len(self.gun_frames) - 1))
                 idx = max(0, min(len(self.gun_frames) - 1, idx))
                 s.blit(self.gun_frames[idx], (gx, gy))
-                # 枪口火焰帧（3D 渲染，添加混合）
                 if (self._muzzle_timer > 0 and self.gun_muzzle_frames
                         and idx < len(self.gun_muzzle_frames)):
                     m_alpha = int((self._muzzle_timer / 80.0) * 200)
@@ -320,6 +459,10 @@ class UI:
                     self.gun_muzzle_frames[idx].set_alpha(255)
             else:
                 s.blit(self.gun_surf, (gx, gy))
+
+        # 击杀通知
+        if self.kill_feed:
+            self.kill_feed.render(s)
 
 
 # ====== 测试入口 ======
