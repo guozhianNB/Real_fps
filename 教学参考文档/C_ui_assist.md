@@ -1,81 +1,53 @@
-# C — UI 辅助模块（零基础入门版）
+﻿# C — UI 组件教程
 
-> 这份文档是**手把手教程**，假设你只有最基础的 Python 语法知识。
-> 每个概念都会先解释「是什么」再告诉你「怎么写」。
-> **所有代码都是完整的、可以直接复制运行**。
-
-你和 B 都是做 UI 的。B 负责**主窗口**（游戏循环、摄像头背景、准星、目标框），
-你负责**UI 组件**（雷达、HUD 面板、命中动画）和**测试工具**。
-
-> 💡 **简单理解：B 搭好了舞台，你往舞台上放道具。**
+> 👋 你好！你和 B 一起做 UI。B 负责**搭舞台**（窗口、背景、准星），你负责**往舞台上放道具**。
+> 具体来说：你写**雷达**、**HUD 面板**、**命中动画**，以及**自测工具**。
+> **每个文件都能独立运行测试，不需要依赖任何人——这是你最大的优势！💪**
 
 ---
 
-## 目录
+## 📖 目录
 
-1. [你需要先理解的概念](#1-你需要先理解的概念)
+1. [先搞懂几个概念](#1-先搞懂几个概念)
 2. [安装环境](#2-安装环境)
-3. [项目文件结构](#3-项目文件结构)
-4. [文件 1：ui/config.py — 共用配置](#4-文件-1-uiconfigpy--共用配置)
-5. [文件 2：ui/assets.py — 资源加载](#5-文件-2-uiassetspy--资源加载)
-6. [文件 3：ui/radar.py — 雷达组件（独立可测试）](#6-文件-3-uiradarpy--雷达组件独立可测试)
-7. [文件 4：ui/hud.py — HUD 面板](#7-文件-4-uihudpy--hud-面板)
-8. [文件 5：ui/effects.py — 动画效果](#8-文件-5-uieffectspy--动画效果)
-9. [文件 6：ui/demo_reader.py — 自测入口](#9-文件-6-uidemo_readerpy--自测入口)
-10. [如何和 B 对接](#10-如何和-b-对接)
-11. [常见错误与解决](#11-常见错误与解决)
+3. [认识项目结构](#3-认识项目结构)
+4. [文件 1：config.py（共用配置）](#4-文件-1-configpy共用配置)
+5. [文件 2：assets.py（资源工具）](#5-文件-2-assetspy资源工具)
+6. [文件 3：radar.py（雷达组件）](#6-文件-3-radarpy雷达组件)
+7. [文件 4：hud.py（HUD 面板）](#7-文件-4-hudpyhud-面板)
+8. [文件 5：effects.py（命中动画）](#8-文件-5-effectspy命中动画)
+9. [文件 6：demo_reader.py（自测入口）](#9-文件-6-demo_readerpy自测入口)
+10. [和 B 对接](#10-和-b-对接)
+11. [常见问题](#11-常见问题)
 
 ---
 
-## 1. 你需要先理解的概念
+## 1. 先搞懂几个概念
 
-### 什么是 Surface（表面）？
+### Surface（画板）
 
-在 Pygame 中，**Surface** 就是一块"画板"。你可以在上面画图、贴字。
-
-- `screen` = 整个窗口的画板
-- 你也可以创建**独立的画板**，在上面画好东西后，再贴到 `screen` 上
-
-这就是你的工作方式：**在独立的 Surface 上画好雷达、HUD，然后交给 B 贴到窗口上**。
+Pygame 里，**Surface** 就是一块画板。`screen` 是最大的画板（整个窗口），你也可以创建小画板：
 
 ```python
-# 创建一个 200x200 的独立画板
-my_surface = pygame.Surface((200, 200))
-
-# 在上面画东西
-pygame.draw.circle(my_surface, (0, 255, 0), (100, 100), 50)
-
-# 贴到主窗口上
-screen.blit(my_surface, (100, 100))
+my_surf = pygame.Surface((200, 200))
+pygame.draw.circle(my_surf, (0,255,0), (100,100), 50)
+screen.blit(my_surf, (100, 100))
 ```
 
-### 什么是透明度（Alpha）？
+你的工作方式就是：**在自己的小画板上画好雷达、HUD，然后交给 B 贴到主窗口上。**
 
-透明度让一个像素"半透明"，能看到底下的内容。
-
-在 Pygame 中，有两种透明度：
-1. **Surface 整体透明度**：整个画板半透明
-2. **每个像素的 Alpha**：不同的像素可以有不同的透明度（需要 `pygame.SRCALPHA`）
+### 透明度（Alpha）
 
 ```python
-# 创建一个支持每像素透明的 Surface
-# SRCALPHA 让这个 Surface 的每个像素都有一个 Alpha 通道
 s = pygame.Surface((100, 100), pygame.SRCALPHA)
-
-# 画一个半透明的圆（255=不透明，0=全透明）
 pygame.draw.circle(s, (0, 0, 0, 128), (50, 50), 30)
 ```
 
-### 什么是时间轴动画？
+### 时间轴动画
 
-动画就是**随时间变化画面**。比如"淡出"就是透明度随时间从 255 降到 0。
-
-你的动画用**时间差（dt）**来控制，而不是用"第几帧"。
-这样即使帧率波动，动画速度也是稳定的。
+用**时间差 dt（毫秒）**来控制，不依赖帧率：
 
 ```python
-# dt = 距离上一帧的毫秒数
-# 每秒降 255 透明度（1 秒内从完全不透明到完全透明）
 alpha = max(0, 255 - dt * (255 / 1000))
 ```
 
@@ -83,1280 +55,407 @@ alpha = max(0, 255 - dt * (255 / 1000))
 
 ## 2. 安装环境
 
-打开终端（Terminal），依次执行：
-
 ```powershell
-# 安装 Pygame
-pip install pygame
-
-# 安装 requests（摄像头画面拉取）
-pip install requests
-
-# 安装 opencv-python（图像解码）
-pip install opencv-python
-
-# 如果 pip 不行，用这个：
-python -m pip install pygame requests opencv-python
-
-# 验证安装
-python -c "import pygame; print('Pygame 版本:', pygame.version.ver)"
+pip install pygame requests opencv-python numpy
+python -c "import pygame; print('Pygame:', pygame.version.ver)"
 ```
 
 ---
 
-## 3. 项目文件结构
-
-你和 B 的代码都在 `ui/` 文件夹下：
+## 3. 认识项目结构
 
 ```
 Real_fps/
-├── ui/                         ← 你和 B 的工作目录（需手动创建）
-│   ├── __init__.py             ← 空文件（让 ui/ 成为 Python 包）
-│   ├── config.py               ← 颜色、位置、尺寸常量（和 B 共用）
-│   ├── assets.py               ← 字体加载工具
-│   ├── radar.py                ← 你写：雷达组件 ⭐ 主要
-│   ├── hud.py                  ← 你写：HUD 面板 ⭐ 主要
-│   ├── effects.py              ← 你写：命中/击杀动画 ⭐ 主要
-│   ├── demo_reader.py          ← 你写：自测入口 ⭐ 主要
-│   └── core.py                 ← B 写：UI 主循环
-├── vision/                     ← 视觉模块（已实现，含有摄像头工具）
-│   ├── camera_share.py         ← FastAPI 摄像头共享服务（端口 8010）
-│   ├── vision.py               ← YOLO 人体跟踪
-│   └── get_camera.py           ← 获取摄像头画面的工具函数
-├── main.py                     ← 主程序入口
-├── start.py                    ← 启动器
-├── readme.md
-└── requirement.txt
+├── ui/
+│   ├── __init__.py         ← 空文件
+│   ├── config.py           ← 颜色、位置常量
+│   ├── assets.py           ← 字体加载工具
+│   ├── radar.py            ← 你写：雷达 ⭐
+│   ├── hud.py              ← 你写：HUD ⭐
+│   ├── effects.py          ← 你写：动画 ⭐
+│   ├── demo_reader.py      ← 你写：自测 ⭐
+│   └── core.py             ← B 写：主循环
+├── vision/                 ← 视觉模块
+├── fire_notifier.py        ← 开火事件 UDP
+├── main.py / start.py
+└── 教学参考文档/
 ```
 
-**请先在 `Real_fps` 文件夹下创建 `ui` 文件夹。**
+> 先去 `Real_fps` 下创建 `ui/` 文件夹！
 
 ---
 
-## 4. 文件 1：`ui/config.py` — 共用配置
-
-B 已经写好了这个文件。**你不需要改它，只需要 import 使用。**
-
-但你要**理解它**：
+## 4. 文件 1：config.py（共用配置）
 
 ```python
 # ui/config.py
-# 所有 UI 相关的配置常量
-# B 和 C 共用这个文件，确保颜色、位置统一
-
-# ====== 窗口设置 ======
 SCREEN_WIDTH = 1280
 SCREEN_HEIGHT = 720
 FPS_TARGET = 60
-
-# ====== 颜色 ======
 COLOR_BLACK = (0, 0, 0)
 COLOR_WHITE = (255, 255, 255)
-COLOR_GREEN = (0, 255, 100)     # 正常状态
-COLOR_RED = (255, 50, 50)       # 锁定/警告
-COLOR_YELLOW = (255, 200, 0)    # 过渡色
+COLOR_GREEN = (0, 255, 100)
+COLOR_RED = (255, 50, 50)
+COLOR_YELLOW = (255, 200, 0)
 COLOR_HUD_BG = (0, 0, 0)
 HUD_BG_ALPHA = 160
-
-# ====== 布局 ======
 CROSSHAIR_SIZE = 20
 RADAR_RADIUS = 75
 RADAR_MARGIN = 20
 HUD_MARGIN = 20
 HUD_LINE_HEIGHT = 35
-
-# ====== 轮询 ======
-STATUS_FILE = "state.json"
-JSON_POLL_INTERVAL = 0.05
-
-# ====== 动画 ======
 FLASH_DURATION_MS = 300
 POPUP_FADEIN_MS = 200
 POPUP_HOLD_MS = 1000
 POPUP_FADEOUT_MS = 400
 ```
 
-在代码中这样使用：
-
-```python
-from ui.config import *
-
-# 现在你可以直接用这些名字了
-print(SCREEN_WIDTH)      # 1280
-print(COLOR_GREEN)       # (0, 255, 100)
-```
-
 ---
 
-## 5. 文件 2：`ui/assets.py` — 资源加载
-
-这个文件提供**字体加载**功能。Pygame 需要字体才能显示文字。
+## 5. 文件 2：assets.py（资源工具）
 
 ```python
 # ui/assets.py
-# 资源加载工具
-# 提供统一的字体获取方式
-
 import pygame
-
-# ==============================================
-#   字体缓存
-# ==============================================
-# 缓存已加载的字体，避免重复创建
-# _font_cache 是一个字典，key=字号，value=Font 对象
 _font_cache = {}
-
 def get_font(size, bold=False):
-    """获取指定大小的字体。
-    
-    参数：
-        size: 字号（像素）
-        bold: 是否加粗
-    
-    返回：
-        pygame.font.Font 对象
-    
-    用法：
-        font = get_font(28)
-        text = font.render("Hello", True, (255, 255, 255))
-    """
-    # 创建缓存的 key：字号 + 是否加粗
     key = (size, bold)
-    
     if key not in _font_cache:
-        # 如果缓存中还没有这个字号，就创建一个
-        # Font(None, size) 使用 Pygame 默认字体
-        # Font("路径", size) 使用指定字体文件
         font = pygame.font.Font(None, size)
         font.set_bold(bold)
         _font_cache[key] = font
-    
     return _font_cache[key]
-
-
-def get_font_small():
-    """快捷方式：获取小号字体（28px）"""
-    return get_font(28)
-
-
-def get_font_large():
-    """快捷方式：获取大号字体（48px）"""
-    return get_font(48)
-
-
-def get_font_huge():
-    """快捷方式：获取超大号字体（72px）"""
-    return get_font(72, bold=True)
-
-
-# ==============================================
-#   颜色工具
-# ==============================================
-
-def alpha_surface(width, height, color, alpha):
-    """创建一个带透明度的纯色 Surface。
-    
-    参数：
-        width, height: 尺寸
-        color: RGB 颜色元组
-        alpha: 透明度（0-255，0=全透明，255=不透明）
-    
-    返回：
-        pygame.Surface 对象
-    
-    用法：
-        bg = alpha_surface(200, 100, (0, 0, 0), 160)
-        screen.blit(bg, (20, 20))
-    """
-    surf = pygame.Surface((width, height), pygame.SRCALPHA)
+def get_font_small(): return get_font(28)
+def get_font_large(): return get_font(48)
+def get_font_huge(): return get_font(72, bold=True)
+def alpha_surface(w, h, color, alpha):
+    surf = pygame.Surface((w, h), pygame.SRCALPHA)
     surf.fill((*color, alpha))
     return surf
 ```
 
 ---
 
-## 6. 文件 3：`ui/radar.py` — 雷达组件（独立可测试）
-
-### 6.1 学习目标
-
-- 画圆、画线
-- 角度计算（数学的三角函数）
-- 旋转动画
-- 独立 Surface 的使用
-
-### 6.2 完整代码
+## 6. 文件 3：radar.py（雷达组件）
 
 ```python
 # ui/radar.py
-# 雷达组件
-#
-# 功能：
-#   - 右下角小圆形雷达
-#   - 旋转扫描线
-#   - 显示目标位置（闪烁圆点）
-#
-# 这个文件可以独立运行测试！
-#   python ui/radar.py
-
-import pygame
-import math
-import sys
-import os
-
-# 让 Python 能找到 ui 包
+import pygame, math, sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
 from ui.config import *
 from ui.assets import get_font_small
 
-# ==============================================
-#   Radar 类
-# ==============================================
-
 class Radar:
-    """雷达组件。
-    
-    用法：
-        radar = Radar(右下角x坐标, 右下角y坐标)
-        radar.render(screen, targets, locked_target_id)
-    """
-    
-    def __init__(self, center_x, center_y, radius=RADAR_RADIUS):
-        """初始化雷达。
-        
-        参数：
-            center_x: 雷达中心 x 坐标
-            center_y: 雷达中心 y 坐标
-            radius: 雷达半径（像素）
-        """
-        self.center_x = center_x
-        self.center_y = center_y
-        self.radius = radius
-        
-        # 扫描线角度（度），从 0 开始，每帧增加
+    def __init__(self, cx, cy, r=RADAR_RADIUS):
+        self.cx, self.cy, self.r = cx, cy, r
         self.scan_angle = 0
-        
-        # 目标点的闪烁控制
-        # 用时间（毫秒）来控制闪烁，而不是帧数
         self.blink_timer = 0
-        
-        # 字体
         self.font = get_font_small()
-    
-    def render(self, surface, targets, locked_target_id=None, dt_ms=16):
-        """在给定 Surface 上绘制雷达。
-        
-        参数：
-            surface: 要绘制到的 Pygame Surface
-            targets: 目标列表（每个目标有 cx, cy, id）
-            locked_target_id: 不使用（保留参数兼容）
-            dt_ms: 距上一帧的毫秒数（用于动画）
-        """
-        cx, cy, r = self.center_x, self.center_y, self.radius
-        
-        # ---- 1. 画雷达底色 ----
-        # 先画一个半透明黑色圆作为背景
-        # 创建一个临时 Surface 来画半透明效果
-        radar_surf = pygame.Surface((r * 2, r * 2), pygame.SRCALPHA)
-        pygame.draw.circle(radar_surf, (0, 0, 0, 120), (r, r), r)
-        # 画边框
-        pygame.draw.circle(radar_surf, COLOR_GREEN, (r, r), r, 2)
-        # 贴到主 surface 上
-        surface.blit(radar_surf, (cx - r, cy - r))
-        
-        # ---- 2. 画十字参考线 ----
-        # 两条垂直的线，把雷达分成四象限
-        pygame.draw.line(surface, COLOR_GREEN, (cx - r, cy), (cx + r, cy), 1)
-        pygame.draw.line(surface, COLOR_GREEN, (cx, cy - r), (cx, cy + r), 1)
-        
-        # ---- 3. 更新扫描线角度 ----
-        # 每秒转 120 度（速度适中）
-        # dt_ms 是毫秒，除以 1000 变成秒
+    def render(self, surface, targets, dt_ms=16):
+        cx, cy, r = self.cx, self.cy, self.r
+        bg = pygame.Surface((r*2, r*2), pygame.SRCALPHA)
+        pygame.draw.circle(bg, (0,0,0,120), (r,r), r)
+        pygame.draw.circle(bg, COLOR_GREEN, (r,r), r, 2)
+        surface.blit(bg, (cx-r, cy-r))
+        pygame.draw.line(surface, COLOR_GREEN, (cx-r, cy), (cx+r, cy), 1)
+        pygame.draw.line(surface, COLOR_GREEN, (cx, cy-r), (cx, cy+r), 1)
         self.scan_angle += 120 * (dt_ms / 1000)
-        if self.scan_angle >= 360:
-            self.scan_angle -= 360
-        
-        # ---- 4. 画扫描线 ----
-        # 用三角函数把角度转成坐标
-        # math.radians(角度) 把度转成弧度（Python 的数学函数用弧度）
-        angle_rad = math.radians(self.scan_angle)
-        end_x = cx + r * math.cos(angle_rad)
-        end_y = cy + r * math.sin(angle_rad)
-        pygame.draw.line(surface, COLOR_GREEN, (cx, cy), (end_x, end_y), 1)
-        
-        # ---- 5. 画目标点 ----
-        # 更新闪烁计时
+        if self.scan_angle >= 360: self.scan_angle -= 360
+        rad = math.radians(self.scan_angle)
+        pygame.draw.line(surface, COLOR_GREEN, (cx, cy), (cx+r*math.cos(rad), cy+r*math.sin(rad)), 1)
         self.blink_timer += dt_ms
-        
-        for target in targets:
-            # 每个目标有 cx, cy（屏幕坐标）
-            # 需要把屏幕坐标转换成雷达上的相对位置
-            # 假设雷达覆盖整个屏幕范围
-            # 屏幕中心 = (SCREEN_WIDTH/2, SCREEN_HEIGHT/2)
-            # 目标相对屏幕中心的偏移
-            screen_cx = SCREEN_WIDTH / 2
-            screen_cy = SCREEN_HEIGHT / 2
-            
-            t_cx = target.get("cx", screen_cx)
-            t_cy = target.get("cy", screen_cy)
-            
-            # 计算偏移（屏幕中心到目标的方向）
-            dx = t_cx - screen_cx
-            dy = t_cy - screen_cy
-            
-            # 限制最大距离（防止超出雷达范围）
-            max_dist = math.sqrt(screen_cx**2 + screen_cy**2)
-            dist = math.sqrt(dx**2 + dy**2)
-            if dist > 0:
-                # 缩放到雷达范围内
-                scale = min(r * 0.8 / dist, 1.0)
-                radar_x = cx + dx * scale
-                radar_y = cy + dy * scale
-            else:
-                radar_x, radar_y = cx, cy
-            
-            # 所有目标统一绿色闪烁
-            color = COLOR_GREEN
-            blink_speed = 400  # 400ms 闪烁一次
-            
-            # 闪烁效果：当 (blink_timer % blink_speed) < blink_speed/2 时显示
-            if (self.blink_timer % blink_speed) < (blink_speed // 2):
-                # 画目标点
-                pygame.draw.circle(surface, color, (int(radar_x), int(radar_y)), 4)
-        
-        # ---- 6. 画雷达标题 ----
+        scx, scy = SCREEN_WIDTH/2, SCREEN_HEIGHT/2
+        for t in targets:
+            dx = t.get("cx", scx) - scx
+            dy = t.get("cy", scy) - scy
+            d = math.hypot(dx, dy)
+            if d > 0:
+                s = min(r * 0.8 / d, 1.0)
+                px, py = cx + dx*s, cy + dy*s
+            else: px, py = cx, cy
+            if (self.blink_timer % 400) < 200:
+                pygame.draw.circle(surface, COLOR_GREEN, (int(px), int(py)), 4)
         label = self.font.render("RADAR", True, COLOR_GREEN)
-        surface.blit(label, (cx - label.get_width() // 2, cy - r - 20))
-
-
-# ==============================================
-#   独立测试入口
-# ==============================================
-
-def test_radar():
-    """独立运行雷达测试。"""
-    pygame.init()
-    
-    WIDTH, HEIGHT = 400, 500
-    screen = pygame.display.set_mode((WIDTH, HEIGHT))
-    pygame.display.set_caption("雷达组件测试")
-    clock = pygame.time.Clock()
-    
-    # 创建雷达（放在窗口中央偏下）
-    radar = Radar(WIDTH // 2, HEIGHT // 2 + 30)
-    
-    # 模拟两个目标
-    test_targets = [
-        {"id": 1, "cx": 640, "cy": 360},
-        {"id": 2, "cx": 600, "cy": 200},
-    ]
-    
-    running = True
-    while running:
-        dt = clock.tick(60)  # dt 是毫秒
-        
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT:
-                running = False
-            elif event.type == pygame.KEYDOWN:
-                if event.key == pygame.K_ESCAPE:
-                    running = False
-        
-        screen.fill(COLOR_BLACK)
-        
-        # 画说明
-        font = pygame.font.Font(None, 24)
-        text = font.render("目标1(640,360) 锁定 | 目标2(600,200) 普通", True, COLOR_WHITE)
-        screen.blit(text, (20, 20))
-        
-        # 画雷达（锁定目标 ID=1）
-        radar.render(screen, test_targets, locked_target_id=1, dt_ms=dt)
-        
-        pygame.display.flip()
-    
-    pygame.quit()
-
+        surface.blit(label, (cx - label.get_width()//2, cy - r - 20))
 
 if __name__ == "__main__":
-    print("=== 雷达组件独立测试 ===")
-    print("按 ESC 退出\n")
-    test_radar()
+    pygame.init()
+    s = pygame.display.set_mode((400, 500))
+    clock = pygame.time.Clock()
+    r = Radar(200, 300)
+    ts = [{"id": 1, "cx": 640, "cy": 360}, {"id": 2, "cx": 600, "cy": 200}]
+    run = True
+    while run:
+        dt = clock.tick(60)
+        for e in pygame.event.get():
+            if e.type == pygame.QUIT or (e.type == pygame.KEYDOWN and e.key == pygame.K_ESCAPE): run = False
+        s.fill(COLOR_BLACK)
+        r.render(s, ts, dt_ms=dt)
+        pygame.display.flip()
+    pygame.quit()
 ```
-
-### 6.3 理解雷达的数学
-
-雷达把**屏幕坐标**映射到**雷达小圆**上：
-
-```
-目标在 (640, 360)，屏幕中心在 (640, 360)
-→ 偏移 (0, 0) → 雷达上在正中央
-
-目标在 (800, 360)，屏幕中心在 (640, 360)
-→ 偏移 (160, 0) → 雷达上在右边
-```
-
-这个映射就是用**比例缩放**实现的：把大屏幕的距离缩放到小雷达里。
-
-### 6.4 独立测试
-
-运行 `python ui/radar.py`，你应该看到一个绿色的雷达在闪烁，两个目标点以不同频率闪烁。
 
 ---
 
-## 7. 文件 4：`ui/hud.py` — HUD 面板
-
-### 7.1 学习目标
-
-- 文字渲染和排版
-- Surface 的 alpha 透明度
-- 条件渲染（不同状态下显示不同颜色）
-
-### 7.2 完整代码
+## 7. 文件 4：hud.py（HUD 面板）
 
 ```python
 # ui/hud.py
-# HUD 面板组件
-#
-# 功能：
-#   - 左上角 Score 显示
-#   - 左上角 Targets 计数
-#   - 左上角 FPS 显示
-#   - 底部状态栏
-#
-# 独立测试：python ui/hud.py
-
-import pygame
-import sys
-import os
-
+import pygame, sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
 from ui.config import *
-from ui.assets import get_font_small, get_font_large, alpha_surface
-
-# ==============================================
-#   HUD 类
-# ==============================================
+from ui.assets import *
 
 class HUD:
-    """HUD 面板组件。
-    
-    用法：
-        hud = HUD()
-        hud.render(screen, state, fps)
-    """
-    
     def __init__(self):
-        """初始化 HUD。"""
         self.font_large = get_font_large()
         self.font_small = get_font_small()
-        
-        # Score 闪烁动画
-        self.score_flash_timer = 0
-        self.score_flash_duration = 500  # 闪烁持续 500ms
-        self.last_score_value = 0
-    
+        self.flash_timer = 0
+        self.last_score = 0
     def render(self, surface, state, fps, dt_ms=16):
-        """在给定 Surface 上绘制 HUD。
-        
-        参数：
-            surface: 要绘制到的 Pygame Surface
-            state: 当前状态字典（从 JSON 解析）
-            fps: 当前帧率（由 B 传入）
-            dt_ms: 距上一帧的毫秒数
-        """
-        # ---- 1. 准备数据 ----
-        score_data = state.get("score", {})
-        score_value = score_data.get("value", 0)
-        score_delta = score_data.get("delta", 0)
-        
+        score = state.get("score", {}).get("value", 0)
         targets = state.get("targets", [])
-        target_count = len(targets)
-        
-        sys_state = state.get("system_state", {})
-        mode = sys_state.get("mode", "idle")
-        msg = sys_state.get("msg", "")
-        
-        serial = state.get("serial", {})
-        serial_status = serial.get("status", "N/A")
-        
-        # ---- 2. 左上角面板背景 ----
-        # 半透明黑色背景，让文字更清晰
-        panel_width = 250
-        panel_height = 120
-        panel = alpha_surface(panel_width, panel_height, COLOR_BLACK, HUD_BG_ALPHA)
-        surface.blit(panel, (HUD_MARGIN - 5, HUD_MARGIN - 5))
-        
-        # ---- 3. Score ----
-        # 检查分数是否变化（触发闪烁）
-        if score_value != self.last_score_value:
-            self.score_flash_timer = self.score_flash_duration
-            self.last_score_value = score_value
-        
-        # 决定 Score 颜色
-        if self.score_flash_timer > 0:
-            score_color = COLOR_YELLOW  # 闪烁时用黄色
-            self.score_flash_timer -= dt_ms
-        else:
-            score_color = COLOR_WHITE
-        
-        score_surf = self.font_large.render(f"SCORE: {score_value}", True, score_color)
-        surface.blit(score_surf, (HUD_MARGIN, HUD_MARGIN))
-        
-        # 如果有 delta，在旁边显示 +分
-        if score_delta > 0:
-            delta_surf = self.font_small.render(f"+{score_delta}", True, COLOR_YELLOW)
-            surface.blit(delta_surf, (HUD_MARGIN + score_surf.get_width() + 10, HUD_MARGIN + 10))
-        
-        # ---- 4. Targets ----
-        targets_surf = self.font_small.render(f"TARGETS: {target_count}", True, COLOR_WHITE)
-        surface.blit(targets_surf, (HUD_MARGIN, HUD_MARGIN + 45))
-        
-        # ---- 5. FPS ----
-        # FPS 低了就变黄，正常就白色
-        fps_color = COLOR_YELLOW if fps < 30 else COLOR_WHITE
-        fps_surf = self.font_small.render(f"FPS: {fps}", True, fps_color)
-        surface.blit(fps_surf, (HUD_MARGIN, HUD_MARGIN + 75))
-        
-        # ---- 6. 底部状态栏 ----
-        # 只有 error 时变红，其余一律白色
-        if mode == "error":
-            status_color = COLOR_RED
-        else:
-            status_color = COLOR_WHITE
-        
-        # 构建状态文本
-        status_text = f"MODE: {mode.upper()}"
-        if serial_status:
-            status_text += f"  |  SERIAL: {serial_status}"
-        if msg:
-            status_text += f"  |  {msg}"
-        
-        status_surf = self.font_small.render(status_text, True, status_color)
-        
-        # 底部居中
-        screen_width = surface.get_width()
-        status_rect = status_surf.get_rect(center=(screen_width // 2, surface.get_height() - 30))
-        
-        # 给状态栏也加半透明背景
-        bg_w = status_surf.get_width() + 20
-        bg_h = status_surf.get_height() + 10
-        bg = alpha_surface(bg_w, bg_h, COLOR_BLACK, HUD_BG_ALPHA)
-        bg_rect = bg.get_rect(center=(screen_width // 2, surface.get_height() - 30))
-        surface.blit(bg, bg_rect)
-        
-        surface.blit(status_surf, status_rect)
-
-
-# ==============================================
-#   独立测试入口
-# ==============================================
-
-def test_hud():
-    """独立运行 HUD 测试。"""
-    pygame.init()
-    
-    WIDTH, HEIGHT = 800, 400
-    screen = pygame.display.set_mode((WIDTH, HEIGHT))
-    pygame.display.set_caption("HUD 组件测试")
-    clock = pygame.time.Clock()
-    
-    hud = HUD()
-    
-    # 模拟状态
-    test_state = {
-        "score": {"value": 100, "delta": 0, "reason": ""},
-        "targets": [
-            {"id": 1, "cx": 640, "cy": 360}
-        ],
-        "system_state": {"mode": "tracking", "msg": "normal"},
-        "serial": {"status": "OK", "msg": "connected"},
-        "target_lock": {"locked": False}
-    }
-    
-    # 让分数变化的计时器
-    change_timer = 0
-    
-    running = True
-    while running:
-        dt = clock.tick(60)
-        change_timer += dt
-        
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT:
-                running = False
-            elif event.type == pygame.KEYDOWN:
-                if event.key == pygame.K_ESCAPE:
-                    running = False
-        
-        # 每 3 秒模拟一次加分
-        if change_timer > 3000:
-            change_timer = 0
-            test_state["score"]["value"] += 50
-            test_state["score"]["delta"] = 50
-        
-        screen.fill(COLOR_BLACK)
-        
-        # 画一些说明
-        font = pygame.font.Font(None, 24)
-        info = font.render("每 3 秒模拟加分一次，观察 Score 闪烁", True, COLOR_WHITE)
-        screen.blit(info, (20, 20))
-        
-        hud.render(screen, test_state, int(clock.get_fps()), dt)
-        
-        pygame.display.flip()
-    
-    pygame.quit()
-
+        mode = state.get("system_state", {}).get("mode", "idle")
+        serial = state.get("serial", {}).get("status", "N/A")
+        if score != self.last_score:
+            self.flash_timer = 500
+            self.last_score = score
+        sc = COLOR_YELLOW if self.flash_timer > 0 else COLOR_WHITE
+        self.flash_timer = max(0, self.flash_timer - dt_ms)
+        panel = alpha_surface(250, 120, COLOR_BLACK, HUD_BG_ALPHA)
+        surface.blit(panel, (HUD_MARGIN-5, HUD_MARGIN-5))
+        surf = self.font_large.render(f"SCORE: {score}", True, sc)
+        surface.blit(surf, (HUD_MARGIN, HUD_MARGIN))
+        surf = self.font_small.render(f"TARGETS: {len(targets)}", True, COLOR_WHITE)
+        surface.blit(surf, (HUD_MARGIN, HUD_MARGIN+45))
+        c = COLOR_YELLOW if fps < 30 else COLOR_WHITE
+        surf = self.font_small.render(f"FPS: {fps}", True, c)
+        surface.blit(surf, (HUD_MARGIN, HUD_MARGIN+75))
+        text = f"MODE: {mode.upper()}  |  SERIAL: {serial}"
+        surf = self.font_small.render(text, True, COLOR_RED if mode=="error" else COLOR_WHITE)
+        sw = surface.get_width()
+        bg = alpha_surface(surf.get_width()+20, surf.get_height()+10, COLOR_BLACK, HUD_BG_ALPHA)
+        surface.blit(bg, bg.get_rect(center=(sw//2, surface.get_height()-30)))
+        surface.blit(surf, surf.get_rect(center=(sw//2, surface.get_height()-30)))
 
 if __name__ == "__main__":
-    print("=== HUD 组件独立测试 ===")
-    print("按 ESC 退出\n")
-    test_hud()
+    pygame.init()
+    s = pygame.display.set_mode((800, 400))
+    clock = pygame.time.Clock()
+    hud = HUD()
+    st = {"score": {"value": 100}, "targets": [{"id": 1}], "system_state": {"mode": "playing"}, "serial": {"status": "OK"}}
+    tmr = 0
+    run = True
+    while run:
+        dt = clock.tick(60)
+        tmr += dt
+        for e in pygame.event.get():
+            if e.type == pygame.QUIT or (e.type == pygame.KEYDOWN and e.key == pygame.K_ESCAPE): run = False
+        if tmr > 3000: tmr = 0; st["score"]["value"] += 50
+        s.fill(COLOR_BLACK)
+        hud.render(s, st, int(clock.get_fps()), dt)
+        pygame.display.flip()
+    pygame.quit()
 ```
 
 ---
 
-## 8. 文件 5：`ui/effects.py` — 动画效果
+## 8. 文件 5：effects.py（命中动画）
 
-### 8.1 学习目标
-
-- 基于时间轴（dt）的动画
-- 透明度渐变（淡入淡出）
-- 缩放动画
-- 管理多个同时运行的效果
-
-### 8.2 完整代码
+> ⚠️ 开火事件不走 JSON！通过 UDP 实时接收，调用 add_hit_flash() 触发。
 
 ```python
 # ui/effects.py
-# 动画效果组件
-#
-# 功能：
-#   - 命中闪光（全屏白色半透明闪烁）
-#   - 得分弹出提示（+分数）
-#
-# 独立测试：python ui/effects.py
-
-import pygame
-import sys
-import os
-
+import pygame, sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
 from ui.config import *
-from ui.assets import get_font_large, get_font_small
-
-# ==============================================
-#   效果基类
-# ==============================================
+from ui.assets import get_font_large
 
 class BaseEffect:
-    """所有效果的基类。
-    
-    每个效果都有的功能：
-    - active: 是否还在播放
-    - update(dt_ms): 更新动画状态
-    - render(surface): 绘制到画面
-    """
-    
-    def __init__(self, duration_ms):
-        self.duration_ms = duration_ms  # 总持续时间
-        self.elapsed_ms = 0             # 已播放时间
-        self.active = True              # 是否活跃
-    
-    def update(self, dt_ms):
-        """更新动画状态。
-        
-        参数：
-            dt_ms: 距上一帧的毫秒数
-        
-        返回：
-            True 表示还在播放，False 表示已结束
-        """
-        if not self.active:
-            return False
-        
-        self.elapsed_ms += dt_ms
-        
-        if self.elapsed_ms >= self.duration_ms:
-            self.active = False  # 动画结束
-            return False
-        
+    def __init__(self, ms): self.duration_ms = ms; self.elapsed_ms = 0; self.active = True
+    def update(self, dt):
+        if not self.active: return False
+        self.elapsed_ms += dt
+        if self.elapsed_ms >= self.duration_ms: self.active = False; return False
         return True
-    
-    def render(self, surface):
-        """子类实现具体的绘制逻辑。"""
-        pass
-
-
-# ==============================================
-#   命中闪光效果
-# ==============================================
+    def render(self, surface): pass
 
 class HitFlash(BaseEffect):
-    """命中闪光：全屏白色半透明，然后淡出。
-    
-    触发条件：fire_state.fired == True
-    持续 300ms：从 alpha=80 降到 alpha=0
-    """
-    
-    def __init__(self):
-        super().__init__(duration_ms=FLASH_DURATION_MS)
-    
+    def __init__(self): super().__init__(FLASH_DURATION_MS)
     def render(self, surface):
-        """绘制闪光效果。"""
-        if not self.active:
-            return
-        
-        # 计算当前透明度
-        # 进度 = 已过时间 / 总时间 (0.0 ~ 1.0)
-        progress = self.elapsed_ms / self.duration_ms
-        
-        # 透明度从 80 线性降到 0
-        alpha = int(80 * (1 - progress))
-        alpha = max(0, min(255, alpha))
-        
-        # 创建一个全屏大小的半透明白色 Surface
-        flash = pygame.Surface(surface.get_size(), pygame.SRCALPHA)
-        flash.fill((255, 255, 255, alpha))
-        surface.blit(flash, (0, 0))
-
-
-# ==============================================
-#   得分弹出提示
-# ==============================================
+        if not self.active: return
+        p = self.elapsed_ms / self.duration_ms
+        a = int(80 * (1 - p))
+        f = pygame.Surface(surface.get_size(), pygame.SRCALPHA)
+        f.fill((255, 255, 255, max(0, min(255, a))))
+        surface.blit(f, (0, 0))
 
 class ScorePopup(BaseEffect):
-    """得分弹出：在屏幕中央显示 "+分数"。
-    
-    生命周期：
-      淡入 200ms → 保持 1000ms → 淡出 400ms
-    """
-    
-    def __init__(self, score_delta, reason=""):
-        super().__init__(duration_ms=POPUP_FADEIN_MS + POPUP_HOLD_MS + POPUP_FADEOUT_MS)
-        self.score_delta = score_delta
-        self.reason = reason
-        self.text = f"+{score_delta}"
-        if reason:
-            self.text += f" {reason}"
-        
+    def __init__(self, delta, reason=""):
+        super().__init__(POPUP_FADEIN_MS + POPUP_HOLD_MS + POPUP_FADEOUT_MS)
+        self.text = f"+{delta}{' '+reason if reason else ''}"
         self.font = get_font_large()
-    
     def render(self, surface):
-        """绘制得分提示。"""
-        if not self.active:
-            return
-        
-        # 计算当前阶段
-        fadein_end = POPUP_FADEIN_MS
-        hold_end = fadein_end + POPUP_HOLD_MS
-        fadeout_end = hold_end + POPUP_FADEOUT_MS
-        
-        alpha = 0
-        
-        if self.elapsed_ms < fadein_end:
-            # 淡入阶段：alpha 0 → 255
-            progress = self.elapsed_ms / fadein_end
-            alpha = int(255 * progress)
-        elif self.elapsed_ms < hold_end:
-            # 保持阶段：alpha = 255
-            alpha = 255
-        elif self.elapsed_ms < fadeout_end:
-            # 淡出阶段：alpha 255 → 0
-            progress = (self.elapsed_ms - hold_end) / POPUP_FADEOUT_MS
-            alpha = int(255 * (1 - progress))
-        
-        alpha = max(0, min(255, alpha))
-        
-        # 渲染文字
-        text_surf = self.font.render(self.text, True, COLOR_YELLOW)
-        
-        # 创建带透明度的文字 Surface
-        text_with_alpha = pygame.Surface(text_surf.get_size(), pygame.SRCALPHA)
-        text_with_alpha.blit(text_surf, (0, 0))
-        text_with_alpha.set_alpha(alpha)
-        
-        # 屏幕中央
-        text_rect = text_with_alpha.get_rect(
-            center=(surface.get_width() // 2, surface.get_height() // 2 - 50)
-        )
-        surface.blit(text_with_alpha, text_rect)
-
-
-# ==============================================
-#   Effects 管理器
-# ==============================================
+        if not self.active: return
+        fi, ho = POPUP_FADEIN_MS, POPUP_FADEIN_MS + POPUP_HOLD_MS
+        if self.elapsed_ms < fi: a = int(255 * self.elapsed_ms / fi)
+        elif self.elapsed_ms < ho: a = 255
+        else: a = int(255 * (1 - (self.elapsed_ms - ho) / POPUP_FADEOUT_MS))
+        a = max(0, min(255, a))
+        t = self.font.render(self.text, True, COLOR_YELLOW)
+        wa = pygame.Surface(t.get_size(), pygame.SRCALPHA); wa.blit(t, (0, 0)); wa.set_alpha(a)
+        surface.blit(wa, wa.get_rect(center=(surface.get_width()//2, surface.get_height()//2 - 50)))
 
 class Effects:
-    """动画效果管理器。
-    
-    管理多个同时运行的效果（闪光、得分提示）。
-    
-    ⚠️ 开火事件来源说明：
-      开火是"事件"，不走 state.json 轮询（延迟太高）。
-      改用 fire_notifier.FireListener 通过 UDP 实时接收。
-      本类提供 add_hit_flash() 方法供外部调用。
-    
-    用法：
-        effects = Effects()
-        effects.update(dt_ms)          # 每帧更新动画
-        effects.render(surface)        # 每帧绘制动画
-        effects.add_hit_flash(zone)    # 外部调用：触发命中闪光
-    """
-    
-    def __init__(self):
-        self.active_effects = []  # 当前活跃的效果列表
-    
-    def add_hit_flash(self, hit_zone="", score_delta=0):
-        """外部调用：添加命中闪光和得分弹出。
-        
-        由 FireListener 回调或 pygame 事件处理触发。
-        
-        参数：
-            hit_zone: "head" / "body" / ""
-            score_delta: 本次得分
-        """
+    def __init__(self): self.active_effects = []
+    def add_hit_flash(self, zone="", delta=0):
         self.active_effects.append(HitFlash())
-        if score_delta > 0:
-            reason = "headshot" if hit_zone == "head" else "hit"
-            self.active_effects.append(ScorePopup(score_delta, reason))
-    
-    def update(self, dt_ms):
-        """更新所有效果（不再需要 state 参数，开火事件已独立）。"""
-        # 把已经结束的效果移除
-        still_active = []
-        for effect in self.active_effects:
-            effect.update(dt_ms)
-            if effect.active:
-                still_active.append(effect)
-        self.active_effects = still_active
-    
+        if delta > 0: self.active_effects.append(ScorePopup(delta, "headshot" if zone=="head" else "hit"))
+    def update(self, dt): self.active_effects = [e for e in self.active_effects if e.update(dt)]
     def render(self, surface):
-        """绘制所有活跃效果。"""
-        for effect in self.active_effects:
-            effect.render(surface)
-
-
-# ==============================================
-#   独立测试入口
-# ==============================================
-
-def test_effects():
-    """独立运行效果测试。"""
-    pygame.init()
-    
-    WIDTH, HEIGHT = 800, 500
-    screen = pygame.display.set_mode((WIDTH, HEIGHT))
-    pygame.display.set_caption("动画效果测试")
-    clock = pygame.time.Clock()
-    
-    effects = Effects()
-    
-    # 模拟状态
-    test_state = {
-        "fire_state": {"fired": False},
-        "score": {"value": 100, "delta": 0, "reason": ""}
-    }
-    
-    # 计时器：每 3 秒触发一次事件
-    timer = 0
-    event_count = 0
-    
-    running = True
-    while running:
-        dt = clock.tick(60)
-        timer += dt
-        
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT:
-                running = False
-            elif event.type == pygame.KEYDOWN:
-                if event.key == pygame.K_ESCAPE:
-                    running = False
-                elif event.key == pygame.K_SPACE:
-                    # 按空格手动触发开火
-                    test_state["fire_state"]["fired"] = True
-        
-        # 自动触发场景（每 3 秒）
-        if timer > 3000:
-            timer = 0
-            event_count += 1
-            
-            # 开火 + 命中
-            test_state["fire_state"]["fired"] = True
-            test_state["score"]["delta"] = 10
-            test_state["score"]["reason"] = "hit"
-            test_state["score"]["value"] += 10
-        
-        # 重置单次事件
-        if test_state["fire_state"]["fired"]:
-            test_state["fire_state"]["fired"] = False
-        if test_state["score"]["delta"] > 0:
-            test_state["score"]["delta"] = 0
-            test_state["score"]["reason"] = ""
-        
-        # 更新 + 绘制
-        effects.update(dt, test_state)
-        
-        screen.fill(COLOR_BLACK)
-        
-        # 提示文字
-        font = pygame.font.Font(None, 24)
-        info_lines = [
-            "按 SPACE 触发开火 + 命中闪光",
-            "按 S 触发得分提示",
-            "每 3 秒自动切换场景",
-            f"活跃效果数: {len(effects.active_effects)}"
-        ]
-        for i, line in enumerate(info_lines):
-            t每 3 秒自动触发一次text, (20, 20 + i * 25))
-        
-        effects.render(screen)
-        
-        pygame.display.flip()
-    
-    pygame.quit()
-
+        for e in self.active_effects: e.render(surface)
 
 if __name__ == "__main__":
-    print("=== 动画效果组件独立测试 ===")
-    print("按 SPACE 触发开火闪光")
-    print("按 S 触发得分提示")
-    print("按 ESC 退出\n")
-    test_effects()
+    pygame.init()
+    s = pygame.display.set_mode((800, 500))
+    clock = pygame.time.Clock()
+    fx = Effects(); tmr = 0
+    run = True
+    while run:
+        dt = clock.tick(60); tmr += dt
+        for e in pygame.event.get():
+            if e.type == pygame.QUIT or (e.type == pygame.KEYDOWN and e.key == pygame.K_ESCAPE): run = False
+            elif e.type == pygame.KEYDOWN and e.key == pygame.K_SPACE: fx.add_hit_flash("head", 50)
+        if tmr > 3000: tmr = 0; fx.add_hit_flash("body", 10)
+        fx.update(dt)
+        s.fill(COLOR_BLACK)
+        f = pygame.font.Font(None, 24)
+        s.blit(f.render(f"空格触发 | 活跃: {len(fx.active_effects)}", True, COLOR_WHITE), (20, 20))
+        fx.render(s)
+        pygame.display.flip()
+    pygame.quit()
 ```
 
 ---
-i/demo_reader.py` — 自测入口
 
-这是**你的自测工具**。它会：
-1. 自动模拟主程序写出 `state.json`
-2. 打开 Pygame 窗口
-3. 显示你的雷达、HUD、动画效果
+## 9. 文件 6：demo_reader.py（自测入口）
 
-**B 也可以用这个文件测试整体 UI。**
-
-> 💡 **关于摄像头画面：** 摄像头走独立的 FastAPI 服务（`vision/camera_share.py`，端口 8010），
-> B 的 `core.py` 会通过 HTTP 拉取 JPEG 图片作为窗口背景。
-> 你的组件（雷达、HUD、动画）始终叠加在背景之上，不需要关心摄像头画面本身。
->
-> 如果你自测时需要获取摄像头画面，可以直接使用 `vision/get_camera.py` 提供的工具函数：
-> ```python
-> from vision.get_camera import get_camera_frame, get_camera_size
->
-> w, h = get_camera_size()            # → (width, height)
-> frame = get_camera_frame()          # → OpenCV BGR numpy 数组
-> ```
-> 启动摄像头服务：`uvicorn vision.camera_share:app --port 8010 --host 127.0.0.1 --reload`
+模拟主程序写 state.json + UDP 开火，让你独立测试全部组件。
 
 ```python
 # ui/demo_reader.py
-# 自测入口：模拟主程序 + 显示你的所有组件
-#
-# 运行方式：
-#   python ui/demo_reader.py
-#
-# 这个脚本会：
-#   1. 在后台不断写入 state.json（模拟主程序）
-#   2. 打开一个 Pygame 窗口
-#   3. 显示你的雷达、HUD、动画效果
-
-import pygame
-import json
-import threading
-import time
-import sys
-import os
-
+import pygame, json, threading, time, sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
 from ui.config import *
-from ui.assets import get_font_small, get_font_large
 from ui.radar import Radar
 from ui.hud import HUD
 from ui.effects import Effects
 from fire_notifier import FireListener, send_fire
 
-# ==============================================
-#   模拟 JSON 写入器（开火事件走 UDP，不走 state.json）
-# ==============================================
-
-class MockStateWriter:
-    """模拟主程序，定时更新 state.json + 通过 UDP 发送开火事件。"""
-    
-    def __init__(self):
-        self._stop = threading.Event()
-    
-    def start(self):
-        thread = threading.Thread(target=self._loop, daemon=True)
-        thread.start()
-    
-    def stop(self):
-        self._stop.set()
-    
+class MockWriter:
+    def __init__(self): self._stop = threading.Event()
+    def start(self): threading.Thread(target=self._loop, daemon=True).start()
+    def stop(self): self._stop.set()
     def _loop(self):
-        scenes = self._build_scenes()
-        scene_idx = 0
-        
-        while not self._stop.is_set():
-            scene = scenes[scene_idx % len(scenes)]
-            scene["timestamp"] = time.time()
-            
-            with open("state.json", "w", encoding="utf-8") as f:
-                json.dump(scene, f, indent=2)
-            
-            # ★ 场景 2（命中）时通过 UDP 发送开火事件
-            if scene_idx % len(scenes) == 2:
-                print("  → 发送 UDP 开火事件")
-                send_fire(hit_zone="head", score_delta=50)
-            
-            scene_idx += 1
-            time.sleep(2.5)
-    
-    def _build_scenes(self):
-        return [
-            # 场景 0：空闲
-            {
-                "system_state": {"mode": "idle", "msg": "等待目标"},
-                "score": {"value": 0},
-                "targets": [],
-                "serial": {"status": "OK", "msg": "connected"}
-            },
-            # 场景 1：追踪一个目标
-            {
-                "system_state": {"mode": "playing", "msg": "目标已发现"},
-                "score": {"value": 0},
-                "targets": [
-                    {"id": 1, "bbox": [620, 240, 780, 420]}
-                ],
-                "serial": {"status": "OK", "msg": "connected"}
-            },
-            # 场景 2：命中（开火事件通过 UDP 发送）
-            {
-                "system_state": {"mode": "playing", "msg": "命中！"},
-                "score": {"value": 50},
-                "targets": [
-                    {"id": 1, "bbox": [600, 320, 680, 400]}
-                ],
-                "serial": {"status": "OK", "msg": "connected"}
-            },
-            # 场景 3：串口断开
-            {
-                "system_state": {"mode": "over", "msg": "串口连接断开"},
-                "score": {"value": 50},
-                "targets": [],
-                "serial": {"status": "ERROR", "msg": "disconnected"}
-            },
+        scenes = [
+            {"system_state": {"mode": "idle"}, "score": {"value": 0}, "targets": [], "serial": {"status": "OK"}},
+            {"system_state": {"mode": "playing"}, "score": {"value": 0}, "targets": [{"id": 1, "bbox": [620, 240, 780, 420]}], "serial": {"status": "OK"}},
+            {"system_state": {"mode": "playing", "msg": "命中！"}, "score": {"value": 50}, "targets": [{"id": 1, "bbox": [600, 320, 680, 400]}], "serial": {"status": "OK"}},
+            {"system_state": {"mode": "over", "msg": "串口断开"}, "score": {"value": 50}, "targets": [], "serial": {"status": "ERROR"}},
         ]
-
-# ==============================================
-#   读取 state.json 的工具函数
-# ==============================================
+        idx = 0
+        while not self._stop.is_set():
+            s = scenes[idx % 4]; s["timestamp"] = time.time()
+            with open("state.json", "w") as f: json.dump(s, f)
+            if idx % 4 == 2: send_fire(hit_zone="head", score_delta=50)
+            idx += 1; time.sleep(2.5)
 
 def read_status():
-    """读取 state.json，失败时返回空字典。"""
     try:
-        with open("state.json", "r", encoding="utf-8") as f:
-            return json.loads(f.read())
-    except (FileNotFoundError, json.JSONDecodeError):
-        return {}
-
-
-# ==============================================
-#   主函数：自测入口
-# ==============================================
+        with open("state.json") as f: return json.loads(f.read())
+    except: return {}
 
 def main():
-    """自测入口。
-    
-    运行方式：python ui/demo_reader.py
-    """
-    print("=== Real FPS — UI 组件自测 ===")
-    print("这个测试会：")
-    print("  1. 自动模拟主程序写入 state.json")
-    print("  2. 显示你的雷达、HUD、动画效果")
-    print("  3. 每 2.5 秒切换一个场景")
-    print()
-    print("按 ESC 或关闭窗口退出\n")
-    
-    # 启动模拟写入器
-    writer = MockStateWriter()
-    writer.start()
-    
-    # 初始化 Pygame
+    print("=== UI 自测 ===")
+    w = MockWriter(); w.start()
     pygame.init()
-    
-    # 窗口模式（方便调试）
-    WIDTH, HEIGHT = 1280, 720
-    screen = pygame.display.set_mode((WIDTH, HEIGHT))
-    pygame.display.set_caption("Real FPS — UI 组件自测")
+    W, H = 1280, 720
+    s = pygame.display.set_mode((W, H))
     clock = pygame.time.Clock()
-    
-    # ---- 初始化 FireListener（UDP 实时接收开火事件） ----
-    FIRE_EVENT_TYPE = pygame.USEREVENT + 1
-
-    def on_fire(event):
-        """FireListener 回调（后台线程）→ 转到 Pygame 主循环处理。"""
-        pygame.event.post(pygame.event.Event(FIRE_EVENT_TYPE, event))
-
-    fire_listener = FireListener(callback=on_fire)
-    fire_listener.start()
-
-    # 初始化你的组件
-    radar = Radar(WIDTH - RADAR_RADIUS - RADAR_MARGIN, HEIGHT - RADAR_RADIUS - RADAR_MARGIN)
-    hud = HUD()
-    effects = Effects()
-    
-    # 字体
-    font_info = pygame.font.Font(None, 24)
-    
-    running = True
-    last_state = {}
-    
-    while running:
+    FIRE = pygame.USEREVENT + 1
+    def on_fire(e): pygame.event.post(pygame.event.Event(FIRE, e))
+    lis = FireListener(callback=on_fire); lis.start()
+    radar = Radar(W - RADAR_RADIUS - RADAR_MARGIN, H - RADAR_RADIUS - RADAR_MARGIN)
+    hud = HUD(); fx = Effects()
+    run, last = True, {}
+    while run:
         dt = clock.tick(FPS_TARGET)
-        
-        # ---- 处理事件（包括 UDP 开火事件） ----
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT:
-                running = False
-            elif event.type == pygame.KEYDOWN:
-                if event.key == pygame.K_ESCAPE:
-                    running = False
-            elif event.type == FIRE_EVENT_TYPE:
-                # ★ 收到 UDP 开火事件！触发命中效果
-                hit_zone = event.__dict__.get("hit_zone", "")
-                score_delta = event.__dict__.get("score_delta", 0)
-                effects.add_hit_flash(hit_zone, score_delta)
-        
-        # ---- 读取最新状态 ----
-        state = read_status()
-        if state:
-            last_state = state
-        else:
-            state = last_state
-        
-        # ---- 更新效果（不再传 state 参数） ----
-        effects.update(dt)
-        
-        # ---- 绘制 ----
-        screen.fill(COLOR_BLACK)
-        
-        # 画一些指引
-        mode = state.get("system_state", {}).get("mode", "?")
-        scene_info = font_info.render(f"当前场景: {mode}  |  场景每 2.5 秒自动切换", True, COLOR_WHITE)
-        screen.blit(scene_info, (20, HEIGHT - 60))
-        
-        # 渲染组件
-        targets = state.get("targets", [])
-        
-        radar.render(screen, targets, dt_ms=dt)
-        hud.render(screen, state, int(clock.get_fps()), dt)
-        effects.render(screen)
-        
-        # ---- 刷新 ----
+        for e in pygame.event.get():
+            if e.type == pygame.QUIT or (e.type == pygame.KEYDOWN and e.key == pygame.K_ESCAPE): run = False
+            elif e.type == FIRE: fx.add_hit_flash(e.__dict__.get("hit_zone", ""), e.__dict__.get("score_delta", 0))
+        st = read_status() or last; last = st
+        fx.update(dt)
+        s.fill(COLOR_BLACK)
+        ts = st.get("targets", [])
+        radar.render(s, ts, dt_ms=dt)
+        hud.render(s, st, int(clock.get_fps()), dt)
+        fx.render(s)
         pygame.display.flip()
-    
-    # ---- 清理 ----
-    writer.stop()
-    fire_listener.stop()
-    pygame.quit()
-    print("测试结束")
+    w.stop(); lis.stop(); pygame.quit()
 
-
-if __name__ == "__main__":
-    main()
-
-B 的 `core.py` 中预留了三个空位，等你把组件交给他：
-
-```python
-# 在 UI.__init__() 中（B 的代码）：
-self.radar = None     # ← 你给 B 代码后，改成 Radar(...)
-self.hud = None       # ← 你给 B 代码后，改成 HUD(...)
-self.effects = None   # ← 你给 B 代码后，改成 Effects(...)
-
-# 在 UI._render() 中（B 的代码）：
-# if self.radar:
-#     self.radar.render(...)    ← 取消注释
-# if self.hud:
-#     self.hud.render(...)      ← 取消注释
-# if self.effects:
-#     self.effects.render(...)  ← 取消注释
-```
-
-**对接步骤：**
-
-1. 你写完 `radar.py`、`hud.py`、`effects.py` 后，先自己用 `demo_reader.py` 测试
-2. 确认没问题后，告诉 B："我的组件写好了"
-3. B 在 `core.py` 顶部加 `from ui.radar import Radar` 等 import
-4. B 在 `__init__` 中创建实例
-5. B 在 `_render` 中调用渲染方法
-
-**你的组件接口（B 会这样调用）：**
-
-```python
-# 雷达
-self.radar.render(screen, targets, locked_target_id, dt_ms)
-
-# HUD
-self.hud.render(screen, state, fps, dt_ms)
-
-# 效果（开火事件由 FireListener 通过 UDP 实时接收）
-from fire_notifier import FireListener
-
-def on_fire_event(event):
-    """FireListener 回调 → 触发效果"""
-    effects.add_hit_flash(event.get("hit_zone"), event.get("score_delta"))
-
-fire_listener = FireListener(callback=on_fire_event)
-fire_listener.start()
-
-# 主循环中：
-effects.update(dt_ms)       # 不再传 state 参数
-effects.render(screen)      # 正常绘制
+if __name__ == "__main__": main()
 ```
 
 ---
 
-## 11. 常见错误与解决
+## 10. 和 B 对接
 
-### ❌ `ModuleNotFoundError: No module named 'ui'`
-→ 运行脚本时必须在 `Real_fps` 目录下。检查当前目录：`python -c "import os; print(os.getcwd())"`
+写完后告诉 B，B 会做三件事：
 
-### ❌ `AttributeError: 'NoneType' object has no attribute 'render'`
-→ 你在调用组件前忘了创建它。检查是否调用了 `Radar(...)` 而不是 `radar = None`。
+### 1. 在 core.py 顶部加 import
+```python
+from ui.radar import Radar
+from ui.hud import HUD
+from ui.effects import Effects
+```
 
-### ❌ 雷达不显示 / 位置不对
-→ 检查 `Radar.__init__` 的 `center_x`, `center_y`。如果在测试时位置不对，调整传入的坐标。
+### 2. 在 UI.__init__ 中创建实例
+```python
+self.radar = Radar(SCREEN_WIDTH - 75 - 20, SCREEN_HEIGHT - 75 - 20)
+self.hud = HUD()
+self.effects = Effects()
+```
 
-### ❌ 动画效果不播放
-→ 检查 `effects.update(dt, state)` 是否每帧都在调用。
-   检查 `fire_state.fired` 是否从 `False` 变成了 `True`（你的 `prev_fired` 逻辑）。
+### 3. 在 _render 中调用
+```python
+if self.radar: self.radar.render(self.screen, targets, dt_ms=16)
+if self.hud: self.hud.render(self.screen, state, fps, dt_ms=16)
+if self.effects: self.effects.render(self.screen)
+```
 
-### ❌ 画面闪烁
-→ 检查是否忘记调 `pygame.display.flip()`。
-   检查是否在 `render()` 里做了耗时操作。
-
-### ❌ 文字模糊或锯齿
-→ `font.render` 的第二个参数是"抗锯齿"。始终传 `True`。
-
-### ❌ import 报红（VS Code 显示红色波浪线）
-→ 这不一定是错误！VS Code 有时找不到模块但运行时正常。
-   只要 `python ui/demo_reader.py` 能跑，就不用管。
+### 4. 开火事件：B 的 core.py 已集成 FireListener
+收到 UDP 开火事件 → 自动调用 `effects.add_hit_flash(...)`
 
 ---
 
-## 你的学习路线
+## 11. 常见问题
 
-1. **先读一遍 B_pygame.md** — 了解 B 在做什么，你的组件要贴在哪里
-2. **运行 ui/radar.py 的独立测试** — 确保 Pygame 能用
-3. **运行 ui/hud.py 的独立测试** — 理解 HUD 的读取状态方式
-4. **运行 ui/effects.py 的独立测试** — 理解时间轴动画
-5. **运行 ui/demo_reader.py** — 把所有组件整合在一起
-6. **和 B 对接** — 把你的组件交给他集成到主 UI
+| 问题 | 原因 | 解决 |
+|------|------|------|
+| ModuleNotFoundError: No module named 'ui' | 运行目录不对 | 在 Real_fps 目录下运行 |
+| 雷达不显示 | 位置坐标算错了 | 检查 Radar 的 cx, cy |
+| 动画不播放 | 没调 update() | 确保每帧调 effects.update(dt) |
+| import 报红波浪线 | VS Code 找不到 | 只要 `python ui/x.py` 能跑就不用管 |
 
-每个文件都能独立运行测试，**不需要依赖任何人的代码**。这是你最大的优势——可以自己做开发。
+---
 
-有问题随时找我！
+## 🎯 你的学习路线
+
+1. **复制 config.py 和 assets.py**
+2. **运行 `python ui/radar.py`** → 看到雷达 ✅
+3. **运行 `python ui/hud.py`** → 看到分数 ✅
+4. **运行 `python ui/effects.py`** → 按空格闪白 ✅
+5. **运行 `python ui/demo_reader.py`** → 三个组件一起出现 🎉
+6. **告诉 B："我写好了！"**
+
+每个文件都能独立运行。先跑起来，再优化。加油！💪

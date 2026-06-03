@@ -1,253 +1,139 @@
-# B — Pygame UI 渲染（零基础入门版）
+# B — Pygame UI 渲染教程
 
-> 这份文档是**手把手教程**，假设你只有最基础的 Python 语法知识。
-> 每个概念都会先解释「是什么」再告诉你「怎么写」。
-> **所有代码都是完整的、可以直接复制运行**。
+> 👋 你好！这份教程是为你准备的，**不需要你有 Pygame 经验**。
+> 每学一个知识点，你就能往最终的 UI 靠近一步。
+> **遇到困难很正常，每解决一个 bug 你的编程能力就提高了一截 💪**
 
 ---
 
-## 目录
+## 📖 目录
 
-1. [你需要先理解的概念](#1-你需要先理解的概念)
+1. [先搞懂几个概念](#1-先搞懂几个概念)
 2. [安装环境](#2-安装环境)
-3. [项目文件结构](#3-项目文件结构)
-4. [第一步：创建空白窗口](#4-第一步创建空白窗口)
+3. [项目里已经有什么](#3-项目里已经有什么)
+4. [第一步：打开一个窗口](#4-第一步打开一个窗口)
 5. [第二步：在窗口上画东西](#5-第二步在窗口上画东西)
-6. [第三步：理解帧率和时钟](#6-第三步理解帧率和时钟)
-7. [第四步：读取 JSON 文件](#7-第四步读取-json-文件)
-8. [第五步：线程 — 让程序同时做多件事](#8-第五步线程--让程序同时做多件事)
-9. [第六步：最终的 UI 核心代码](#9-第六步最终的-ui-核心代码)
-10. [第七步：demo_emitter.py — 自己模拟测试](#10-第七步-demo_emitterpy--自己模拟测试)
-11. [常见错误与解决](#11-常见错误与解决)
+6. [第三步：读取 JSON 文件](#6-第三步读取-json-文件)
+7. [第四步：实时接收开火事件（UDP）](#7-第四步实时接收开火事件udp)
+8. [第五步：线程不卡顿](#8-第五步线程不卡顿)
+9. [第六步：摄像头画面做背景](#9-第六步摄像头画面做背景)
+10. [第七步：完整的 UI 核心代码](#10-第七步完整的-ui-核心代码)
+11. [常见问题](#11-常见问题)
 
 ---
 
-## 1. 你需要先理解的概念
+## 1. 先搞懂几个概念
 
 ### 什么是 Pygame？
 
-Pygame 是一个 Python 库，它可以让你：
-- 打开一个**窗口**
-- 在窗口里**画图**（圆形、矩形、文字、图片）
-- 检测用户的**键盘和鼠标操作**
-- 实现**动画**（让画面动起来）
+Pygame 帮你做三件事：
+1. **开一个窗口** — 就像打开画图软件
+2. **在窗口上画图** — 画圆、画方块、写文字
+3. **知道用户在干嘛** — 按键盘了？点鼠标了？
 
-简单说：Pygame = 画板 + 时钟 + 事件检测器。
-
-### 什么是游戏循环（Game Loop）？
-
-几乎所有的游戏和实时程序都是这样工作的：
-
+```python
+import pygame
+pygame.init()                            # 开机
+screen = pygame.display.set_mode((800, 600))  # 窗口
+pygame.display.flip()                    # 显示
 ```
+
+### 什么是游戏循环？
+
+所有实时程序都这样工作：
+
+```python
 while True:
-    处理用户输入（鼠标、键盘）
-    更新游戏状态（分数、位置、动画）
-    绘制画面（画到窗口上）
-    等待一小段时间（控制速度）
+    处理输入        # 用户按了什么键？
+    更新状态        # 分数变了没？动画到哪了？
+    绘制画面        # 画到窗口上
+    等一小会儿      # 控制速度，别跑太快
 ```
 
-这个循环每秒会跑很多次（通常是 60 次），所以看起来是流畅的动画。
+这个循环每秒跑 60 次，看起来就是流畅的动画。
 
-### 什么是事件（Event）？
+### 什么是 Surface？
 
-事件就是「发生了什么」。比如：
-- 用户移动了鼠标 → `MOUSEMOTION` 事件
-- 用户按下了键盘 → `KEYDOWN` 事件
-- 用户点了关闭按钮 → `QUIT` 事件
+**Surface = 画板**
 
-Pygame 会把所有事件放在一个**队列**里，你通过 `pygame.event.get()` 取出处理。
+- `screen` 就是整个窗口的画板
+- 你也可以创建**独立的小画板**，画好东西再贴到大画板上
+- 贴图用 `blit`（读作"布利特"）
 
-### 什么是 JSON？
-
-JSON 是一种**文本格式**，用来在不同程序之间传递数据。它长这样：
-
-```json
-{
-    "score": 100,
-    "mode": "tracking",
-    "targets": [
-        {"id": 1, "x": 640, "y": 360}
-    ]
-}
+```python
+# 创建一个小画板
+my_surface = pygame.Surface((200, 200))
+# 在小画板上画个圆
+pygame.draw.circle(my_surface, (0, 255, 0), (100, 100), 50)
+# 贴到主窗口上
+screen.blit(my_surface, (100, 100))
 ```
 
-你只需要知道两件事：
-- `json.loads(字符串)` → 把 JSON 文本变成 Python 字典
-- `json.dumps(字典)` → 把 Python 字典变成 JSON 文本
+### 什么是事件？
 
-### 什么是线程（Thread）？
+事件就是"发生了什么"：
+- 用户点了关闭 → `pygame.QUIT`
+- 用户按了键盘 → `pygame.KEYDOWN`
+- 用户动了鼠标 → `pygame.MOUSEMOTION`
 
-线程让程序可以**同时做多件事**。比如：
-
-- **主线程**：负责画 UI（Pygame 窗口）
-- **另一个线程**：负责读取 JSON 文件
-
-这样即使 JSON 文件读取慢一点，UI 也不会卡住。
-
-把线程想象成**两条并行的流水线**，互不干扰。
+你通过 `pygame.event.get()` 一次性取出所有待处理的事件。
 
 ---
 
 ## 2. 安装环境
 
-打开终端（Terminal），依次执行：
+```powershell
+pip install pygame requests opencv-python numpy
+```
+
+装好后验证一下（没有报错就 OK）：
 
 ```powershell
-# 安装 Pygame（用于 UI 窗口）
-pip install pygame
-
-# 安装 pyee（用于事件广播，C 队友需要）
-pip install pyee
-
-# 安装 requests（用于从摄像头服务拉取画面）
-pip install requests
-
-# 如果提示 pip 不是命令，用这个：
-python -m pip install pygame pyee requests
-
-# 验证是否安装成功（没有报错就 OK）
 python -c "import pygame; print('Pygame 版本:', pygame.version.ver)"
 ```
 
 ---
 
-## 3. 项目文件结构
+## 3. 项目里已经有什么
 
-你的代码都放在 `ui/` 文件夹下。C 队友的代码也会放在这里。
+先看看你的工作目录，心里有个底：
 
 ```
 Real_fps/
-├── ui/                         ← 你和 C 的工作目录（需手动创建）
-│   ├── __init__.py             ← 让 ui/ 成为 Python 包（内容为空）
-│   ├── config.py               ← 你和 C 共用的颜色、位置常量
-│   ├── core.py                 ← 你的核心文件：UI 主循环
-│   ├── radar.py                ← C 负责：雷达组件
-│   ├── hud.py                  ← C 负责：HUD 面板
-│   ├── effects.py              ← C 负责：命中动画
-│   ├── demo_emitter.py         ← C 负责：模拟器测试脚本
-│   └── assets.py               ← C 负责：字体等资源加载
-├── vision/                     ← 视觉模块（已实现）
-│   ├── camera_share.py         ← FastAPI 摄像头共享服务（端口 8010）
-│   ├── vision.py               ← YOLO 人体跟踪 + 分析
-│   └── get_camera.py           ← 获取摄像头画面的工具函数
-├── main.py                     ← 主程序入口
-├── start.py                    ← 启动器（一键启动摄像头服务 + 主程序）
-├── A_serial.py                 ← 串口通信
-├── readme.md
-└── requirement.txt
+├── ui/                     ← 你和 C 的工作目录（还没创建，现在就去建！）
+├── vision/                 ← 视觉模块（别人写好的，你直接调用）
+│   ├── camera_share.py     ← 摄像头服务（提供画面）
+│   ├── vision.py           ← YOLO 人体跟踪
+│   └── get_camera.py       ← 获取摄像头画面的工具
+├── main.py                 ← 主程序（写 state.json 的人）
+├── fire_notifier.py        ← 开火事件 UDP 广播（你要用它）
+├── mouse.py                ← 鼠标监听模块
+├── start.py                ← 一键启动
+└── 教学参考文档/            ← 你们的学习资料
 ```
 
-**请先在 `Real_fps` 文件夹下手动创建 `ui` 文件夹。**
+> 🎯 **你的任务：** 写 `ui/core.py`，打开 Pygame 窗口，显示摄像头背景、准星、目标框，调用 C 的组件。
+
+**现在就去 `Real_fps` 文件夹下创建一个 `ui` 文件夹。**
 
 ---
 
-## 4. 第一步：创建空白窗口
+## 4. 第一步：打开一个窗口
 
-先跑通最简单的 Pygame 程序，确保环境没问题。
-
-创建一个文件 `ui/test_window.py`（这只是练习，后面会删掉）：
+创建一个文件 `ui/test_window.py`，先确认 Pygame 能跑：
 
 ```python
 # ui/test_window.py
-# 这是你的第一个 Pygame 程序
-
-import pygame  # 导入 Pygame 库
-
-# ====== 初始化 ======
-pygame.init()  # 初始化 Pygame（必须写这行）
-
-# 设置窗口大小：宽 1280 像素，高 720 像素
-WINDOW_WIDTH = 1280
-WINDOW_HEIGHT = 720
-
-# 创建一个窗口，返回一个 "表面"（Surface）
-# Surface 就是画板，你在上面画东西
-screen = pygame.display.set_mode((WINDOW_WIDTH, WINDOW_HEIGHT))
-
-# 设置窗口标题
-pygame.display.set_caption("Real FPS - UI Test")
-
-# ====== 游戏循环 ======
-running = True  # 控制循环是否继续
-
-while running:  # 只要 running 为 True，就不断循环
-    # ---- 1. 处理事件 ----
-    for event in pygame.event.get():  # 取出所有待处理的事件
-        if event.type == pygame.QUIT:  # 如果用户点了关闭按钮
-            running = False  # 退出循环
-        elif event.type == pygame.KEYDOWN:  # 如果用户按了键盘
-            if event.key == pygame.K_ESCAPE:  # 按的是 ESC 键
-                running = False
-
-    # ---- 2. 绘制画面 ----
-    screen.fill((0, 0, 0))  # 用黑色填充整个窗口
-
-    # ---- 3. 刷新显示 ----
-    pygame.display.flip()  # 把画好的内容显示到屏幕上
-
-# ====== 退出 ======
-pygame.quit()  # 关闭 Pygame
-```
-
-**运行：**
-
-```powershell
-python ui/test_window.py
-```
-
-你会看到一个黑色窗口。按 ESC 或点关闭按钮可以退出。
-
-> 💡 **逐行解释：**
-> - `pygame.init()` → 打开 Pygame 的"电源开关"
-> - `pygame.display.set_mode((宽, 高))` → 创建一个窗口
-> - `screen.fill((R, G, B))` → 用颜色填充窗口。`(0,0,0)` 是黑色，`(255,0,0)` 是红色
-> - `pygame.display.flip()` → 把画好的内容显示出来（就像翻书一样）
-> - `pygame.event.get()` → 获取所有事件（鼠标、键盘、窗口操作）
-> - `pygame.quit()` → 关闭 Pygame
-
----
-
-## 5. 第二步：在窗口上画东西
-
-现在来画一些有用的东西：**圆形（准星）、矩形（目标框）、文字（HUD）**。
-
-创建一个新文件 `ui/test_draw.py`（练习用）：
-
-```python
-# ui/test_draw.py
-# 学习如何在窗口上画各种图形
-
 import pygame
 import sys
 
-# ====== 初始化 ======
 pygame.init()
+screen = pygame.display.set_mode((1280, 720))
+pygame.display.set_caption("我的第一个窗口 🎉")
+clock = pygame.time.Clock()
 
-WIDTH, HEIGHT = 1280, 720
-screen = pygame.display.set_mode((WIDTH, HEIGHT))
-pygame.display.set_caption("Real FPS - Drawing Test")
-clock = pygame.time.Clock()  # 时钟，用于控制帧率
-
-# ====== 颜色常量 ======
-# RGB = 红绿蓝，每个值 0~255
-COLOR_GREEN = (0, 255, 100)     # 准星绿色
-COLOR_RED = (255, 50, 50)       # 锁定红色
-COLOR_WHITE = (255, 255, 255)   # 白色文字
-COLOR_BLACK = (0, 0, 0)         # 黑色背景
-COLOR_HUD_BG = (0, 0, 0, 160)   # 半透明黑（注意：pygame 里需要特殊处理）
-
-# ====== 字体 ======
-# 创建字体对象，第一个参数是字体名，None 表示用默认字体
-# 第二个参数是字号
-font_large = pygame.font.Font(None, 48)   # 大号字体（48 像素）
-font_small = pygame.font.Font(None, 28)   # 小号字体（28 像素）
-
-# ====== 游戏循环 ======
 running = True
-frame_count = 0  # 用来计数帧数
-
 while running:
-    # ---- 处理事件 ----
     for event in pygame.event.get():
         if event.type == pygame.QUIT:
             running = False
@@ -255,152 +141,103 @@ while running:
             if event.key == pygame.K_ESCAPE:
                 running = False
 
-    # ---- 清空画面 ----
-    screen.fill(COLOR_BLACK)
-
-    # ========== 1. 画准星（十字线 + 圆环） ==========
-    center_x, center_y = WIDTH // 2, HEIGHT // 2  # 画面中心
-    crosshair_size = 20  # 准星大小
-
-    # pygame.draw.circle(画板, 颜色, (圆心x, 圆心y), 半径, 线宽)
-    # 线宽=0 是实心圆，>0 是空心圆
-    pygame.draw.circle(screen, COLOR_GREEN, (center_x, center_y), 15, 2)  # 外圈空心圆
-    pygame.draw.circle(screen, COLOR_GREEN, (center_x, center_y), 2, 0)   # 中心实心点
-
-    # 画十字线：两条线，水平和垂直
-    # pygame.draw.line(画板, 颜色, 起点, 终点, 线宽)
-    pygame.draw.line(screen, COLOR_GREEN, (center_x - 25, center_y), (center_x - 18, center_y), 2)  # 左横线
-    pygame.draw.line(screen, COLOR_GREEN, (center_x + 18, center_y), (center_x + 25, center_y), 2)  # 右横线
-    pygame.draw.line(screen, COLOR_GREEN, (center_x, center_y - 25), (center_x, center_y - 18), 2)  # 上竖线
-    pygame.draw.line(screen, COLOR_GREEN, (center_x, center_y + 18), (center_x, center_y + 25), 2)  # 下竖线
-
-    # ========== 2. 画目标框 ==========
-    # 模拟一个目标框：左上角(600,300) 右下角(680,420)
-    target_rect = pygame.Rect(600, 300, 80, 120)  # (x, y, 宽, 高)
-    pygame.draw.rect(screen, COLOR_RED, target_rect, 2)  # 2 像素宽的红色框
-
-    # ========== 3. 画 HUD 文字 ==========
-    # font.render(文字, 抗锯齿, 颜色) → 返回一个文字"图片"
-    # 然后通过 blit 把这个"图片"贴到画板上
-
-    # 左上角：Score
-    score_text = font_large.render("SCORE: 100", True, COLOR_WHITE)
-    screen.blit(score_text, (20, 20))  # (x, y) 是文字左上角的位置
-
-    # 左上角：Targets
-    targets_text = font_small.render("TARGETS: 3", True, COLOR_WHITE)
-    screen.blit(targets_text, (20, 70))
-
-    # 左上角：FPS
-    fps = int(clock.get_fps())  # clock.get_fps() 返回当前帧率
-    fps_text = font_small.render(f"FPS: {fps}", True, COLOR_WHITE)
-    screen.blit(fps_text, (20, 100))
-
-    # 底部居中：系统状态
-    status_text = font_small.render("MODE: tracking  |  SERIAL: connected", True, COLOR_WHITE)
-    text_rect = status_text.get_rect(center=(WIDTH // 2, HEIGHT - 30))
-    screen.blit(status_text, text_rect)
-
-    # ---- 刷新 ----
-    pygame.display.flip()
-    clock.tick(60)  # 控制帧率在 60 FPS
-    frame_count += 1
+    screen.fill((0, 0, 0))        # 黑色背景
+    pygame.display.flip()         # 刷新
+    clock.tick(60)                # 每秒 60 帧
 
 pygame.quit()
 sys.exit()
 ```
 
-**运行：** `python ui/test_draw.py`
+```powershell
+python ui/test_window.py
+```
 
-你应该会看到：
-- 绿色准星在画面正中央
-- 红色矩形框模拟目标
-- 左上角显示 SCORE、TARGETS、FPS
-- 底部显示系统状态
-
-> 💡 **核心函数总结：**
->
-> | 函数 | 作用 | 参数示例 |
-> |------|------|----------|
-> | `pygame.draw.circle(surface, color, center, radius, width)` | 画圆 | `(screen, (0,255,0), (640,360), 15, 2)` |
-> | `pygame.draw.rect(surface, color, rect, width)` | 画矩形 | `(screen, (255,0,0), Rect(600,300,80,120), 2)` |
-> | `pygame.draw.line(surface, color, start, end, width)` | 画线 | `(screen, (0,255,0), (0,0), (100,100), 2)` |
-> | `font.render(text, antialias, color)` | 创建文字"图片" | `(font.render("Hello", True, (255,255,255)))` |
-> | `surface.blit(source, position)` | 贴图 | `screen.blit(text, (20, 20))` |
-> | `clock.tick(fps)` | 控制帧率 | `clock.tick(60)` 每秒最多 60 帧 |
+看到一个黑色窗口了吗？🎉 如果没有，检查是不是在 `Real_fps` 目录下运行的。
 
 ---
 
-## 6. 第三步：理解帧率和时钟
+## 5. 第二步：在窗口上画东西
 
-`clock.tick(60)` 做了两件事：
-1. **限制速度**：让循环每秒最多执行 60 次（60 FPS）
-2. **返回时间**：返回上一帧到这一帧经过的毫秒数
-
-为什么需要限制帧率？
-- 不限制的话，程序会跑得飞快，CPU 占用 100%
-- 限制后，画面流畅且 CPU 占用低
+现在学怎么画准星、目标框、文字。创建一个 `ui/test_draw.py`：
 
 ```python
+# ui/test_draw.py
+import pygame
+import sys
+
+pygame.init()
+WIDTH, HEIGHT = 1280, 720
+screen = pygame.display.set_mode((WIDTH, HEIGHT))
+pygame.display.set_caption("画图练习 🎨")
 clock = pygame.time.Clock()
 
+# 定义颜色（RGB，每个值 0~255）
+GREEN = (0, 255, 100)
+RED   = (255, 50, 50)
+WHITE = (255, 255, 255)
+BLACK = (0, 0, 0)
+
+# 字体
+font_large = pygame.font.Font(None, 48)
+font_small = pygame.font.Font(None, 28)
+
+running = True
 while running:
-    dt = clock.tick(60)  # dt = 距上一帧的毫秒数，约 16ms
-    # 用 dt 做动画：移动距离 = 速度 × dt/1000
+    for event in pygame.event.get():
+        if event.type == pygame.QUIT:
+            running = False
+        elif event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
+            running = False
+
+    screen.fill(BLACK)
+
+    # ====== 画准星（画面正中央）======
+    cx, cy = WIDTH // 2, HEIGHT // 2
+    pygame.draw.circle(screen, GREEN, (cx, cy), 15, 2)       # 外圈
+    pygame.draw.circle(screen, GREEN, (cx, cy), 2, 0)        # 中心点
+    # 十字线
+    pygame.draw.line(screen, GREEN, (cx - 25, cy), (cx - 18, cy), 2)
+    pygame.draw.line(screen, GREEN, (cx + 18, cy), (cx + 25, cy), 2)
+    pygame.draw.line(screen, GREEN, (cx, cy - 25), (cx, cy - 18), 2)
+    pygame.draw.line(screen, GREEN, (cx, cy + 18), (cx, cy + 25), 2)
+
+    # ====== 画目标框（模拟一个人）======
+    rect = pygame.Rect(600, 300, 80, 120)
+    pygame.draw.rect(screen, RED, rect, 2)
+
+    # ====== 写文字 ======
+    score_text = font_large.render("SCORE: 100", True, WHITE)
+    screen.blit(score_text, (20, 20))
+
+    fps = int(clock.get_fps())
+    fps_text = font_small.render(f"FPS: {fps}", True, WHITE)
+    screen.blit(fps_text, (20, 70))
+
+    pygame.display.flip()
+    clock.tick(60)
+
+pygame.quit()
+sys.exit()
 ```
+
+> 💡 **核心函数速查：**
+>
+> | 你要做什么 | 怎么写 |
+> |-----------|--------|
+> | 画空心圆 | `pygame.draw.circle(画板, 颜色, 圆心, 半径, 线宽)` |
+> | 画矩形框 | `pygame.draw.rect(画板, 颜色, Rect(x,y,w,h), 线宽)` |
+> | 画直线 | `pygame.draw.line(画板, 颜色, 起点, 终点, 线宽)` |
+> | 写文字 | `字体.render("文字", True, 颜色)` → `画板.blit(文字图片, 位置)` |
+> | 贴图 | `画板.blit(要贴的东西, (x, y))` |
 
 ---
 
-## 7. 第四步：读取 JSON 文件
+## 6. 第三步：读取 JSON 文件
 
-这是你工作中最重要的部分：**从 JSON 文件中读取主程序写好的状态数据**。
+主程序（`main.py`）会不断地把**当前状态**写到 `state.json` 里。你的 UI 需要定时去读它。
 
-### 7.1 什么是 JSON 文件读取
-
-```python
-import json
-
-# 假设有一个文件 state.json，内容如下：
-# {"score": {"value": 100, "delta": 0}, "mode": "tracking"}
-
-# 读取方式：
-with open("state.json", "r", encoding="utf-8") as f:
-    text = f.read()       # text 是字符串
-    data = json.loads(text)  # data 是 Python 字典
-
-# 现在你可以像用字典一样用 data：
-print(data["score"]["value"])  # 输出 100
-```
-
-### 7.2 异常处理很重要
-
-如果 JSON 文件不存在、或者内容写坏了，程序会崩溃。所以要用 `try/except`：
-
-```python
-import json
-
-def read_status():
-    """读取状态 JSON 文件，失败时返回空字典"""
-    try:
-        with open("state.json", "r", encoding="utf-8") as f:
-            return json.loads(f.read())
-    except FileNotFoundError:
-        print("警告：state.json 不存在")
-        return {}
-    except json.JSONDecodeError:
-        print("警告：state.json 格式错误")
-        return {}
-```
-
-**这就是你 UI 模块读取状态的方式。** 主程序（我）会定时更新 `state.json`，你定时读取它。
-
-### 7.3 主程序会写入的 JSON 结构
-
-主程序会写一个 `state.json` 文件，**只包含「状态」**（模式、分数、目标列表）。
-
-> ⚠️ **「事件」不走 JSON！**
-> 开火是事件，需要实时响应。如果放在 JSON 里，UI 每 50ms 轮询一次，开火动画最高延迟 50ms。
-> **解决方案：开火事件通过 UDP 本地广播实时通知 UI（详见下文 7.4 节）**
+### state.json 长什么样
 
 ```json
 {
@@ -414,901 +251,435 @@ def read_status():
 }
 ```
 
-各字段含义：
-- `system_state.mode`：当前状态 `idle` / `playing` / `paused` / `over`
-- `score.value`：当前分数
-- `targets`：所有检测到的目标列表
-- `serial.status`：串口状态
+### 怎么读
+
+```python
+import json
+
+def read_status():
+    """读取 state.json，失败时返回空字典"""
+    try:
+        with open("state.json", "r", encoding="utf-8") as f:
+            return json.loads(f.read())
+    except FileNotFoundError:
+        return {}           # 文件还没生成，正常
+    except json.JSONDecodeError:
+        return {}           # 文件写坏了，忽略
+```
+
+> ⚠️ **注意：开火事件不在 JSON 里！** 开火是事件，走 UDP 实时通知（见下一节）。
 
 ---
 
-### 7.4 开火事件实时通知（UDP 广播）
+## 7. 第四步：实时接收开火事件（UDP）
 
-开火事件走独立的 **UDP 本地广播**，不经过 `state.json`。
+开火是**事件**，不是状态。如果放在 JSON 里轮询，最快也要 50ms 才能发现，动画就会延迟。
 
-```
-主程序 main.py                   你的 UI
-    │                               │
-    │ 检测到开火                     │ 后台 FireListener 线程
-    │                               │ 一直在监听端口 8099
-    │─── UDP ──→ {"event":"fire",   │
-    │            "hit_zone":"head", │ ← 收到后立即触发动画
-    │            "score_delta":50}   │
-    │                               │
-```
+解决方案：**UDP 广播**。主程序开火的瞬间发一个数据包，你的 UI 立刻收到。
 
-#### 你的 UI 中怎么用
+### 怎么用
 
 ```python
 from fire_notifier import FireListener
 
-class UI:
-    def __init__(self):
-        # ... 其他初始化 ...
-        
-        # 启动开火事件监听（实时接收，不轮询）
-        self.fire_listener = FireListener(callback=self._on_fire_event)
-        self.fire_listener.start()
-    
-    def _on_fire_event(self, event):
-        """收到开火事件时被自动调用（在后台线程中）。
-        
-        event 格式：
-            {"event": "fire", "hit_zone": "head", "score_delta": 50, "timestamp": ...}
-        """
-        hit_zone = event.get("hit_zone", "")     # "head" 或 "body"
-        score_delta = event.get("score_delta", 0) # 50 或 10
-        
-        # 把事件放入 Pygame 事件队列，主循环下一帧处理
-        pygame.event.post(pygame.event.Event(
-            pygame.USEREVENT + 1,  # 自定义事件
-            {"hit_zone": hit_zone, "score_delta": score_delta}
-        ))
-        
-        # 你也可以直接在这里触发效果（注意线程安全）
-        print(f"[UI] 开火！{hit_zone} +{score_delta}")
+# 创建监听器（后台线程自动运行）
+listener = FireListener(callback=my_callback)
+listener.start()
+
+# 回调函数（开火时被自动调用）
+def my_callback(event):
+    hit_zone = event.get("hit_zone", "")        # "head" 或 "body"
+    score_delta = event.get("score_delta", 0)   # 50 或 10
+    print(f"🔥 开火！{hit_zone} +{score_delta}")
 ```
 
-> 💡 **提示：** `FireListener` 的回调在**后台线程**中运行。
-> 如果你要在回调中操作 Pygame（创建 Surface、播放动画），
-> 最好通过 `pygame.event.post()` 把事件发到主循环，
-> 或者在 Effects 类中加一个线程安全的队列。
+### 在 Pygame 里用的标准做法
 
-#### 可以用 pygame.event.post() 把事件转到主循环
+因为回调在**后台线程**运行，不能直接操作 Pygame，所以用 `pygame.event.post()` 把事件转到主循环：
 
 ```python
-# 在 UI 的 __init__ 中注册自定义事件
-FIRE_EVENT = pygame.USEREVENT + 1
+import pygame
+from fire_notifier import FireListener
 
-# 在 FireListener 回调中
-def _on_fire_event(self, event):
+FIRE_EVENT = pygame.USEREVENT + 1  # 自定义事件编号
+
+def on_fire(event):
+    """后台线程收到 UDP 开火 → 转到 Pygame 主循环"""
     pygame.event.post(pygame.event.Event(FIRE_EVENT, event))
 
-# 在主循环的事件处理中
+fire_listener = FireListener(callback=on_fire)
+fire_listener.start()
+
+# 在主循环中：
 for event in pygame.event.get():
     if event.type == FIRE_EVENT:
-        # 收到开火事件！触发动画
         hit_zone = event.__dict__.get("hit_zone", "")
-        self.effects.add_hit_flash(hit_zone)
-```
-
-#### FireListener 完整用法
-
-```python
-from fire_notifier import FireListener
-
-# 创建监听器（回调函数在后台线程执行）
-listener = FireListener(callback=my_callback)
-listener.start()   # 开始监听
-# ... 程序结束前 ...
-listener.stop()    # 停止监听
+        score_delta = event.__dict__.get("score_delta", 0)
+        # 触发命中闪光 + 得分弹出
+        effects.add_hit_flash(hit_zone, score_delta)
 ```
 
 ---
 
----
+## 8. 第五步：线程不卡顿
 
-## 8. 第五步：线程 — 让程序同时做多件事
+如果每帧都去读硬盘文件，程序会卡。解决方案：**后台线程读 JSON，主循环只管画**。
 
-### 8.1 为什么需要线程
-
-你的渲染循环需要每秒刷新 60 次。如果每次刷新都去读硬盘上的 JSON 文件，速度会很慢。
-
-解决方案：**开一个后台线程专门读 JSON**，读完后通过**队列**把结果传给主循环。
-
-### 8.2 什么是队列（Queue）
-
-队列就像一根**管道**：
-- 一个线程把数据放进管道（`put`）
-- 另一个线程从管道取出数据（`get`）
-
-```python
-import queue
-
-q = queue.Queue()
-
-# 线程 A（生产者）
-q.put("hello")
-
-# 线程 B（消费者）
-data = q.get()  # data = "hello"
-```
-
-### 8.3 线程基础
+### 用队列（Queue）在线程之间传数据
 
 ```python
 import threading
+import queue
+import json
 import time
 
-def background_work():
-    """这个函数会在后台运行"""
-    count = 0
-    while True:
-        print(f"后台工作中... {count}")
-        count += 1
-        time.sleep(1)  # 等 1 秒
+event_q = queue.Queue()  # 线程安全的管道
 
-# 创建并启动线程
-# target=函数名（注意：不要加括号）
-# daemon=True 表示"守护线程"，主程序退出时自动结束
-thread = threading.Thread(target=background_work, daemon=True)
+def json_reader():
+    """后台线程：每 50ms 读一次 state.json"""
+    while True:
+        try:
+            with open("state.json", "r") as f:
+                text = f.read()
+            event_q.put(("json", text))   # 放入队列
+        except FileNotFoundError:
+            pass
+        time.sleep(0.05)
+
+# 启动后台线程
+thread = threading.Thread(target=json_reader, daemon=True)
 thread.start()
 
-# 主程序继续做别的事
-for i in range(5):
-    print(f"主程序工作中... {i}")
-    time.sleep(0.5)
-
-# 程序结束后，daemon 线程会自动退出
+# 主循环中：
+while running:
+    try:
+        while True:
+            msg_type, payload = event_q.get_nowait()
+            if msg_type == "json":
+                state = json.loads(payload)  # 解析 JSON
+    except queue.Empty:
+        pass
+    # ... 画画面 ...
 ```
-
-### 8.4 在你的 UI 中的用法
-
-你会创建两个后台线程：
-1. **JSON 读取线程**：每 50ms 读一次 `state.json`，结果放入队列
-2. **摄像头拉取线程**（见下文）：每 33ms 从 FastAPI 拉取一帧画面
-
-主循环只从队列取数据，不做文件 IO 或网络请求。
 
 ---
 
-## 8.5 摄像头画面从哪来？
+## 9. 第六步：摄像头画面做背景
 
-> ⚠️ **重要：摄像头画面不放在 state.json 里！**
-> 它走独立的 FastAPI 服务，UI 通过 HTTP 拉取 JPEG 图片。
-
-### 摄像头画面从哪来？
-
-项目已经提供了两种获取摄像头画面的方式：
-
-#### 方式一：`vision/get_camera.py`（推荐 — 最简单）
+项目已经提供了现成的工具函数，你直接调用就行：
 
 ```python
-from vision.get_camera import get_camera_frame, get_camera_size
-
-# 获取摄像头画面尺寸
-w, h = get_camera_size()  # 返回 (width, height)
-
-# 获取最新一帧（返回 OpenCV BGR 图像）
-frame = get_camera_frame()
-if frame is not None:
-    # frame 就是 numpy 数组，可直接用
-    cv2.imshow("camera", frame)
-```
-
-#### 方式二：`vision/vision.py` 的 `HumanTracker`
-
-```python
-from vision.vision import HumanTracker
-
-tracker = HumanTracker()  # 自动后台拉取 + YOLO 跟踪
-frame, result, _ = tracker.get_latest()
-```
-
-### camera_share.py 在哪里？
-
-摄像头共享服务位于 `vision/camera_share.py`，它是一个 **FastAPI 服务**：
-
-```
-vision/camera_share.py
-  └── FastAPI 服务 (端口 8010)
-       ├── GET /snapshot → 返回最新帧的 JPEG 图片
-       └── GET /size     → 返回 {"width": W, "height": H}
-```
-
-### 如何启动它？
-
-**方式一：用 start.py 一键启动（推荐）**
-```powershell
-python start.py
-```
-这会自动启动 uvicorn + 主程序。
-
-**方式二：手动启动**
-```powershell
-# 新开一个终端
-uvicorn vision.camera_share:app --port 8010 --host 127.0.0.1 --reload
-```
-
-### 你的 UI 怎么拿到画面？
-
-你的 `core.py` 可以集成摄像头拉取线程。它会：
-1. 每 33ms 调用 `get_camera_frame()` 获取最新画面
-2. 拿到 numpy 数组 → 转为 Pygame Surface → 铺满全屏
-
-```python
-import cv2
 from vision.get_camera import get_camera_frame
+import cv2
 
 frame = get_camera_frame()
 if frame is not None:
-    # BGR → RGB
+    # BGR → RGB（Pygame 用 RGB）
     frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-    # numpy → Pygame Surface
-    frame_surface = pygame.surfarray.make_surface(frame_rgb.swapaxes(0, 1))
-    frame_surface = pygame.transform.scale(frame_surface, (WIDTH, HEIGHT))
-    screen.blit(frame_surface, (0, 0))
+    # numpy 数组 → Pygame Surface
+    surf = pygame.surfarray.make_surface(frame_rgb.swapaxes(0, 1))
+    surf = pygame.transform.scale(surf, (WIDTH, HEIGHT))
+    screen.blit(surf, (0, 0))
 ```
 
-### 测试步骤
-
-```powershell
-# 终端 1：一键启动摄像头服务 + 主程序
-python start.py
-
-# 或者分开启动：
-# 终端 1：启动摄像头服务
-uvicorn vision.camera_share:app --port 8010 --host 127.0.0.1 --reload
-
-# 终端 2：启动 UI
-python -c "from ui.core import UI; UI(fullscreen=False).start()"
-```
-
-### 如果摄像头启动失败怎么办？
-
-- 检查摄像头是否被其他程序占用（如 Zoom、OBS）
-- 尝试换个 USB 口
-- 可以在 `vision/camera_share.py` 中修改 `camera_id=0` 为 `camera_id=1`
-- 没有摄像头画面时 UI 会显示黑色背景 + 提示文字，不会崩溃
+> 💡 **没有摄像头怎么办？** UI 不会崩溃，会显示黑色背景 + 提示文字。
 
 ---
 
-## 9. 第六步：最终的 UI 核心代码
+## 10. 第七步：完整的 UI 核心代码
 
-现在把上面所有知识整合起来。你只需要写三个文件：
+把前面所有知识整合起来。这是你的最终作品——**`ui/core.py`**。
 
-### 文件 1：`ui/__init__.py`
-
-```python
-# ui/__init__.py
-# 这个文件让 ui 文件夹成为一个 Python 包
-# 里面什么都不用写，但文件必须存在
-```
-
-### 文件 2：`ui/config.py`
-
-这是你和 C 队友**共用**的颜色和位置配置。C 的雷达、HUD 也会从这里读颜色。
-
-```python
-# ui/config.py
-# 所有 UI 相关的配置常量
-# B 和 C 共用这个文件，确保颜色、位置统一
-
-# ====== 窗口设置 ======
-SCREEN_WIDTH = 1280
-SCREEN_HEIGHT = 720
-FPS_TARGET = 60          # 目标帧率
-
-# ====== 颜色 ======
-# RGB 颜色：每个值范围 0-255
-# (R, G, B) 或 (R, G, B, A) — A 是透明度（Pygame 中需要特殊支持）
-COLOR_BLACK = (0, 0, 0)
-COLOR_WHITE = (255, 255, 255)
-COLOR_GREEN = (0, 255, 100)       # 准星/正常状态
-COLOR_RED = (255, 50, 50)         # 锁定/警告状态
-COLOR_YELLOW = (255, 200, 0)      # 目标锁定过渡色
-COLOR_HUD_BG = (0, 0, 0)          # HUD 背景（纯黑，通过透明度 Surface 实现）
-HUD_BG_ALPHA = 160                # HUD 背景透明度（0=全透明，255=不透明）
-
-# ====== 布局位置 ======
-CROSSHAIR_SIZE = 20     # 准星大小
-RADAR_RADIUS = 75        # 雷达半径
-RADAR_MARGIN = 20        # 雷达距右下角边距
-
-HUD_MARGIN = 20          # HUD 左上角边距
-HUD_LINE_HEIGHT = 35     # HUD 每行高度
-
-# ====== JSON 轮询设置 ======
-STATUS_FILE = "state.json"       # 主程序会写入这个文件
-JSON_POLL_INTERVAL = 0.05        # 每 50ms 读一次 JSON
-
-# ====== 动画设置 ======
-FLASH_DURATION_MS = 300          # 命中闪光持续时间（毫秒）
-POPUP_FADEIN_MS = 200            # 提示淡入时间
-POPUP_HOLD_MS = 1000             # 提示保持时间
-POPUP_FADEOUT_MS = 400           # 提示淡出时间
-```
-
-### 文件 3：`ui/core.py` — **最重要的文件**
-
-这是你的主 UI 类。**每一行都有注释，请仔细阅读。**
+每一行都有注释，**看不懂的地方先跳过，跑起来再说**。
 
 ```python
 # ui/core.py
 # Real FPS — 主 UI 模块
-# 这个文件包含 UI 类，负责：
+#
+# 功能：
 #   1. 打开 Pygame 窗口
-#   2. 后台读取 JSON 状态文件（不阻塞主循环）
-#   3. 在窗口上绘制准星、目标框、
-#      并调用 C 的雷达、HUD、动画组件
-#   4. 支持摄像头画面作为背景
+#   2. 后台线程读取 state.json + 拉取摄像头画面
+#   3. 显示摄像头背景、准星、目标框
+#   4. 通过 UDP 实时接收开火事件
+#   5. 调用 C 的雷达、HUD、动画组件
+#
+# 运行：
+#   from ui.core import UI
+#   UI(fullscreen=False).start()
 
 import pygame
 import json
 import threading
 import queue
 import time
-import sys
-import os
-import cv2          # 用于解码摄像头 JPEG → numpy
-import numpy as np  # 用于图像数据处理
+import cv2
+import numpy as np
+from pathlib import Path
 
-# 导入配置文件
-from ui.config import *
+# ====== 配置常量（直接写在这里，简单明了）======
+SCREEN_WIDTH = 1280
+SCREEN_HEIGHT = 720
+FPS = 60
+CROSSHAIR_SIZE = 20
+HUD_MARGIN = 20
 
-# ==============================================
-#   UI 类
-# ==============================================
+COLOR_BLACK = (0, 0, 0)
+COLOR_WHITE = (255, 255, 255)
+COLOR_GREEN = (0, 255, 100)
+COLOR_RED = (255, 50, 50)
+
+STATUS_FILE = "state.json"
+FIRE_EVENT = pygame.USEREVENT + 1  # UDP 开火事件的自定义编号
+
 
 class UI:
-    """主 UI 类。
-    
-    用法：
-        ui = UI()
-        ui.start()   # 开始渲染（这个方法会阻塞，直到窗口关闭）
-    """
-    
-    def __init__(self, width=SCREEN_WIDTH, height=SCREEN_HEIGHT, fullscreen=True):
-        """初始化 UI。
-        
-        参数：
-            width: 窗口宽度（像素）
-            height: 窗口高度（像素）
-            fullscreen: 是否全屏
-        """
-        self.width = width
-        self.height = height
+    """主 UI 类。调用 start() 后一直运行，直到窗口关闭。"""
+
+    def __init__(self, fullscreen=False):
         self.fullscreen = fullscreen
-        
-        # ---- 数据容器 ----
-        # 最新的 JSON 状态（由后台线程更新）
+
+        # 数据容器（后台线程写，主循环读）
         self.latest_state = {}
-        # 最新的摄像头帧（由后台线程更新）
         self.latest_frame = None
-        
-        # ---- 线程安全队列 ----
-        # 后台线程把数据放进队列，主循环从队列取出
         self.event_q = queue.Queue()
-        
-        # ---- 线程控制 ----
-        # threading.Event() 是一个开关
-        # .set() = 打开（告诉线程停止）
-        # .clear() = 关闭（告诉线程继续工作）
-        self._stop_reader = threading.Event()
-        
-        # ---- 动画相关 ----
+        self._stop = threading.Event()
+
+        # 动画相关
         self.clock = pygame.time.Clock()
         self.prev_time = time.time()
-        
-        # ---- 渲染组件占位 ----
-        # C 队友会实现这些类，你拿到后在这里初始化
-        # 暂时用 None，等 C 交付后替换
-        self.radar = None     # 以后: Radar(...)
-        self.hud = None       # 以后: HUD(...)
-        self.effects = None   # 以后: Effects(...)
-        
-        print("[UI] 初始化完成")
-    
-    # ==========================================
-    #   后台线程：JSON 读取
-    # ==========================================
-    
+
+        # C 的组件（暂时 None，等你集成）
+        self.radar = None
+        self.hud = None
+        self.effects = None
+
+        print("[UI] 初始化完成，准备起飞 🚀")
+
+    # --------------------------------------------------
+    #  启动后台线程
+    # --------------------------------------------------
+
     def _start_json_reader(self):
-        """启动 JSON 读取后台线程。
-        
-        这个线程每 50ms 读取一次 state.json，
-        把内容放进队列，主循环取走。
-        """
-        def reader_loop():
-            """后台循环（在独立线程中运行）"""
-            while not self._stop_reader.is_set():
+        """后台：每 50ms 读一次 state.json"""
+        def loop():
+            while not self._stop.is_set():
                 try:
-                    # 尝试读取 JSON 文件
                     with open(STATUS_FILE, "r", encoding="utf-8") as f:
-                        text = f.read()
-                    # 把文本放进队列，主循环会取走
-                    self.event_q.put(("json_text", text))
+                        self.event_q.put(("json", f.read()))
                 except FileNotFoundError:
-                    # 文件还不存在，忽略（第一次运行时的正常情况）
                     pass
                 except json.JSONDecodeError:
-                    # 文件内容损坏，忽略
-                    print("[UI] JSON 解析错误")
-                    self.event_q.put(("json_text", '{"system_state":{"mode":"error","msg":"JSON parse error"}}'))
-                except Exception as e:
-                    # 其他错误
-                    print(f"[UI] JSON 读取错误: {e}")
-                
-                # 等待 50ms 再读下一次
-                # 不要一直读，否则 CPU 会很高
-                time.sleep(JSON_POLL_INTERVAL)
-        
-        # 创建并启动线程
-        # daemon=True: 主程序退出时，这个线程自动结束
-        thread = threading.Thread(target=reader_loop, daemon=True)
-        thread.start()
-        print("[UI] JSON 读取线程已启动")
-    
-    # ==========================================
-    #   后台线程：摄像头画面拉取（从 FastAPI）
-    # ==========================================
-    
+                    pass
+                time.sleep(0.05)
+
+        t = threading.Thread(target=loop, daemon=True)
+        t.start()
+
     def _start_camera_reader(self):
-        """启动摄像头画面拉取线程。
-        
-        从 camera_share.py 的 FastAPI 服务拉取 JPEG 图片，
-        解码后放入队列供主循环使用。
-        
-        camera_share 运行方式（需另开终端）：
-            uvicorn vision.camera_share:app --port 8010 --host 127.0.0.1 --reload
-        """
-        import requests  # 注意：需要 pip install requests
-        import io
-        import numpy as np
-        
-        CAMERA_URL = "http://127.0.0.1:8010/snapshot"
-        
-        def reader_loop():
-            """后台循环（在独立线程中运行）"""
-            fail_count = 0
-            while not self._stop_reader.is_set():
+        """后台：每 33ms 拉取一帧摄像头画面"""
+        import requests
+
+        def loop():
+            while not self._stop.is_set():
                 try:
-                    # 从 FastAPI 拉取 JPEG 图片
-                    resp = requests.get(CAMERA_URL, timeout=1.0)
+                    resp = requests.get("http://127.0.0.1:8010/snapshot", timeout=1.0)
                     if resp.status_code == 200:
-                        # 把 JPEG 字节解码为 numpy 数组（BGR 格式）
-                        img_array = np.frombuffer(resp.content, dtype=np.uint8)
-                        frame = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
+                        arr = np.frombuffer(resp.content, dtype=np.uint8)
+                        frame = cv2.imdecode(arr, cv2.IMREAD_COLOR)
                         if frame is not None:
-                            # 把 BGR 转为 RGB（Pygame 用 RGB）
-                            frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                            self.event_q.put(("camera_frame", frame_rgb))
-                            fail_count = 0
-                        else:
-                            fail_count += 1
-                    else:
-                        fail_count += 1
-                except requests.ConnectionError:
-                    fail_count += 1
-                    if fail_count == 1:  # 只在第一次报错
-                        print("[UI] 摄像头服务未启动，请运行: uvicorn vision.camera_share:app --port 8010")
-                except Exception as e:
-                    fail_count += 1
-                    if fail_count == 1:
-                        print(f"[UI] 摄像头拉取错误: {e}")
-                
-                # 每 33ms 拉取一帧（≈30 FPS）
+                            rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                            self.event_q.put(("camera", rgb))
+                except Exception:
+                    pass
                 time.sleep(0.033)
-        
-        thread = threading.Thread(target=reader_loop, daemon=True)
-        thread.start()
-        print("[UI] 摄像头拉取线程已启动")
-    
-    # ==========================================
-    #   主循环
-    # ==========================================
-    
+
+        t = threading.Thread(target=loop, daemon=True)
+        t.start()
+
+    def _start_fire_listener(self):
+        """后台：UDP 监听开火事件"""
+        from fire_notifier import FireListener
+
+        def on_fire(event):
+            pygame.event.post(pygame.event.Event(FIRE_EVENT, event))
+
+        self._fire_listener = FireListener(callback=on_fire)
+        self._fire_listener.start()
+
+    # --------------------------------------------------
+    #  启动 UI（阻塞，直到窗口关闭）
+    # --------------------------------------------------
+
     def start(self):
-        """启动 UI（这个方法会阻塞，直到窗口关闭）。"""
-        # ---- 初始化 Pygame ----
         pygame.init()
-        
-        # 创建窗口
-        # FULLSCREEN = 全屏，0 = 窗口模式
+
         flags = pygame.FULLSCREEN if self.fullscreen else 0
-        self.screen = pygame.display.set_mode((self.width, self.height), flags)
+        self.screen = pygame.display.set_mode(
+            (SCREEN_WIDTH, SCREEN_HEIGHT), flags
+        )
         pygame.display.set_caption("Real FPS")
-        
-        # ---- 启动后台线程 ----
-        self._start_json_reader()   # 开始读取 JSON
-        self._start_camera_reader() # 开始拉取摄像头画面
-        
-        # ---- 进入主循环 ----
+
+        # 启动后台线程
+        self._start_json_reader()
+        self._start_camera_reader()
+        self._start_fire_listener()
+
         print("[UI] 进入主循环")
         self._main_loop()
-        
-        # ---- 退出 ----
+
+        # 清理
+        self._stop.set()
+        if hasattr(self, '_fire_listener'):
+            self._fire_listener.stop()
         pygame.quit()
         print("[UI] 已退出")
-    
-    def stop(self):
-        """请求 UI 停止（信号方式）。"""
-        self._stop_reader.set()  # 告诉后台线程停止
-    
+
+    # --------------------------------------------------
+    #  主循环
+    # --------------------------------------------------
+
     def _main_loop(self):
-        """UI 主循环。
-        
-        这个循环每秒执行约 60 次。
-        每次做三件事：
-            1. 处理事件（从队列中取数据）
-            2. 更新动画状态
-            3. 绘制画面
-        """
         running = True
-        
+
         while running:
-            # ====== 1. 处理 Pygame 事件（键盘、鼠标、窗口） ======
+            # ---- 1. 处理 Pygame 事件 ----
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     running = False
-                elif event.type == pygame.KEYDOWN:
-                    if event.key == pygame.K_ESCAPE:
-                        running = False
-            
-            # ====== 2. 处理后台线程发来的数据 ======
-            # 一次性取出队列中所有待处理的消息
+                elif event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
+                    running = False
+                elif event.type == FIRE_EVENT:
+                    # 收到 UDP 开火事件！
+                    if self.effects:
+                        hit_zone = event.__dict__.get("hit_zone", "")
+                        score_delta = event.__dict__.get("score_delta", 0)
+                        self.effects.add_hit_flash(hit_zone, score_delta)
+
+            # ---- 2. 处理后台线程发来的数据 ----
             try:
                 while True:
-                    # get_nowait() 不阻塞，没有消息就抛异常
-                    evt_type, payload = self.event_q.get_nowait()
-                    
-                    if evt_type == "json_text":
-                        self._apply_json(payload)
-                    elif evt_type == "camera_frame":
+                    typ, payload = self.event_q.get_nowait()
+                    if typ == "json":
+                        self.latest_state = json.loads(payload)
+                    elif typ == "camera":
                         self.latest_frame = payload
-                    # 以后可以加更多消息类型
             except queue.Empty:
-                # 队列为空，说明没有新消息，继续
                 pass
-            
-            # ====== 3. 计算时间差 ======
-            # dt = 上一帧到这一帧的毫秒数
-            # 用于动画：让动画速度不受帧率影响
+
+            # ---- 3. 更新时间 ----
             now = time.time()
             dt_ms = (now - self.prev_time) * 1000
             self.prev_time = now
-            
-            # ====== 4. 更新动画 ======
-            # 以后 C 的 effects 会在这里更新
-            # if self.effects:
-            #     self.effects.update(dt_ms, self.latest_state)
-            
-            # ====== 5. 绘制画面 ======
+
+            # ---- 4. 更新动画 ----
+            if self.effects:
+                self.effects.update(dt_ms)
+
+            # ---- 5. 绘制 ----
             self._render()
-            
-            # ====== 6. 刷新显示 ======
+
+            # ---- 6. 刷新 ----
             pygame.display.flip()
-            
-            # ====== 7. 控制帧率 ======
-            # clock.tick(FPS_TARGET) 会等待足够的时间，
-            # 让循环正好每秒执行 FPS_TARGET 次
-            self.clock.tick(FPS_TARGET)
-        
-        # 退出主循环后，清理
-        self.stop()
-    
-    # ==========================================
-    #   JSON 解析
-    # ==========================================
-    
-    def _apply_json(self, text):
-        """解析 JSON 文本并更新状态。
-        
-        如果解析失败，保留上一帧的状态，
-        并在 system_state 中标记错误。
-        """
-        try:
-            if text:
-                self.latest_state = json.loads(text)
-        except json.JSONDecodeError:
-            print("[UI] JSON 解析失败，使用上一帧状态")
-            # 给状态加一个错误标记（不覆盖原有状态）
-            if "system_state" not in self.latest_state:
-                self.latest_state["system_state"] = {}
-            self.latest_state["system_state"]["mode"] = "error"
-            self.latest_state["system_state"]["msg"] = "JSON parse error"
-    
-    # ==========================================
-    #   渲染（核心绘制逻辑）
-    # ==========================================
-    
+            self.clock.tick(FPS)
+
+    # --------------------------------------------------
+    #  绘制
+    # --------------------------------------------------
+
     def _render(self):
-        """绘制一帧画面。
-        
-        绘制顺序（从下到上）：
-            1. 摄像头背景（从 FastAPI 拉取的画面）
-            2. 目标框
-            3. 准星
-            4. HUD（C 负责）
-            5. 雷达（C 负责）
-            6. 动画效果（C 负责）
-        """
-        state = self.latest_state  # 简写
-        
-        # ---- 1. 背景：摄像头画面 or 黑色 ----
+        state = self.latest_state
+
+        # ---- 背景：摄像头画面或黑色 ----
         if self.latest_frame is not None:
-            # 把 numpy 数组（RGB）转为 Pygame Surface
-            # latest_frame 是 RGB 格式的 numpy 数组
-            frame_surface = pygame.surfarray.make_surface(
+            surf = pygame.surfarray.make_surface(
                 self.latest_frame.swapaxes(0, 1)
             )
-            # 缩放到窗口大小
-            frame_surface = pygame.transform.scale(
-                frame_surface, (self.width, self.height)
-            )
-            self.screen.blit(frame_surface, (0, 0))
+            surf = pygame.transform.scale(surf, (SCREEN_WIDTH, SCREEN_HEIGHT))
+            self.screen.blit(surf, (0, 0))
         else:
-            # 没有摄像头画面时，显示黑色背景 + 提示
             self.screen.fill(COLOR_BLACK)
-            if not hasattr(self, '_camera_warned'):
-                font = pygame.font.Font(None, 36)
-                warn = font.render("等待摄像头画面... 请启动 camera_share.py", True, COLOR_WHITE)
-                warn_rect = warn.get_rect(center=(self.width//2, self.height//2))
-                self.screen.blit(warn, warn_rect)
-                self._camera_warned = True
-        
-        # ---- 2. 目标框（从 JSON 读取） ----
-        # 从 JSON 中读取 targets 列表，为每个目标画框
+
+        # ---- 目标框 ----
         targets = state.get("targets", [])
-        for target in targets:
-            bbox = target.get("bbox")
+        for t in targets:
+            bbox = t.get("bbox")
             if bbox and len(bbox) == 4:
                 x1, y1, x2, y2 = bbox
                 rect = pygame.Rect(x1, y1, x2 - x1, y2 - y1)
-                
-                # 所有目标都用绿色框
                 pygame.draw.rect(self.screen, COLOR_GREEN, rect, 2)
-                
-                # 在框上方显示目标 ID 和置信度
-                label = f"ID:{target.get('id', '?')} {target.get('conf', 0):.2f}"
-                if 'font_small' in dir(self):
-                    text = self.font_small.render(label, True, COLOR_GREEN)
-                    self.screen.blit(text, (x1, y1 - 20))
-        
-        # ---- 3. 准星（画面正中央，始终绿色） ----
-        center_x, center_y = self.width // 2, self.height // 2
+
+        # ---- 准星 ----
+        cx, cy = SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2
         cs = CROSSHAIR_SIZE
-        
-        # 准星颜色固定为绿色，只在开火时闪烁一下
-        crosshair_color = COLOR_GREEN
-        
-        # 外圈
-        pygame.draw.circle(self.screen, crosshair_color, (center_x, center_y), 15, 2)
-        # 中心点
-        pygame.draw.circle(self.screen, crosshair_color, (center_x, center_y), 2, 0)
-        # 十字线
-        pygame.draw.line(self.screen, crosshair_color, (center_x - cs - 5, center_y), (center_x - 18, center_y), 2)
-        pygame.draw.line(self.screen, crosshair_color, (center_x + 18, center_y), (center_x + cs + 5, center_y), 2)
-        pygame.draw.line(self.screen, crosshair_color, (center_x, center_y - cs - 5), (center_x, center_y - 18), 2)
-        pygame.draw.line(self.screen, crosshair_color, (center_x, center_y + 18), (center_x, center_y + cs + 5), 2)
-        
-        # ---- 4. HUD 信息（直接绘制，方便 C 队友参考） ----
+        pygame.draw.circle(self.screen, COLOR_GREEN, (cx, cy), 15, 2)
+        pygame.draw.circle(self.screen, COLOR_GREEN, (cx, cy), 2, 0)
+        pygame.draw.line(self.screen, COLOR_GREEN, (cx - cs - 5, cy), (cx - 18, cy), 2)
+        pygame.draw.line(self.screen, COLOR_GREEN, (cx + 18, cy), (cx + cs + 5, cy), 2)
+        pygame.draw.line(self.screen, COLOR_GREEN, (cx, cy - cs - 5), (cx, cy - 18), 2)
+        pygame.draw.line(self.screen, COLOR_GREEN, (cx, cy + 18), (cx, cy + cs + 5), 2)
+
+        # ---- HUD 信息 ----
         try:
-            font_small = pygame.font.Font(None, 28)
             font_large = pygame.font.Font(None, 48)
-            
-            # 左上：Score
-            score_val = state.get("score", {}).get("value", 0)
-            score_surf = font_large.render(f"SCORE: {score_val}", True, COLOR_WHITE)
-            self.screen.blit(score_surf, (HUD_MARGIN, HUD_MARGIN))
-            
-            # 左上：Targets
-            target_count = len(targets)
-            targets_surf = font_small.render(f"TARGETS: {target_count}", True, COLOR_WHITE)
-            self.screen.blit(targets_surf, (HUD_MARGIN, HUD_MARGIN + 40))
-            
-            # 左上：FPS
+            font_small = pygame.font.Font(None, 28)
+
+            score = state.get("score", {}).get("value", 0)
+            text = font_large.render(f"SCORE: {score}", True, COLOR_WHITE)
+            self.screen.blit(text, (HUD_MARGIN, HUD_MARGIN))
+
             fps = int(self.clock.get_fps())
-            fps_surf = font_small.render(f"FPS: {fps}", True, COLOR_WHITE)
-            self.screen.blit(fps_surf, (HUD_MARGIN, HUD_MARGIN + 70))
-            
-            # 底部居中：系统状态
-            sys_mode = state.get("system_state", {}).get("mode", "idle")
-            sys_msg = state.get("system_state", {}).get("msg", "")
-            serial_status = state.get("serial", {}).get("status", "N/A")
-            status_text = f"MODE: {sys_mode.upper()}  |  SERIAL: {serial_status}"
-            if sys_msg:
-                status_text += f"  |  {sys_msg}"
-            
-            status_surf = font_small.render(status_text, True, COLOR_WHITE)
-            status_rect = status_surf.get_rect(center=(self.width // 2, self.height - 30))
-            self.screen.blit(status_surf, status_rect)
-            
-        except Exception as e:
-            print(f"[UI] HUD 渲染错误: {e}")
-        
-        # ---- 5. 调用 C 的组件（以后接入） ----
-        # if self.radar:
-        #     self.radar.render(self.screen, targets, locked_id)
-        # if self.hud:
-        #     self.hud.render(self.screen, state, fps)
-        # if self.effects:
-        #     self.effects.render(self.screen)
-    
-    # ==========================================
-    #   工具方法
-    # ==========================================
-    
-    def get_state(self, key, default=None):
-        """安全地获取 JSON 状态中的某个字段。
-        
-        用法：
-            mode = ui.get_state("system_state", {}).get("mode", "idle")
-        """
-        return self.latest_state.get(key, default)
+            text = font_small.render(f"FPS: {fps}", True, COLOR_WHITE)
+            self.screen.blit(text, (HUD_MARGIN, HUD_MARGIN + 50))
+
+            mode = state.get("system_state", {}).get("mode", "idle")
+            serial = state.get("serial", {}).get("status", "N/A")
+            text = font_small.render(
+                f"MODE: {mode.upper()}  |  SERIAL: {serial}", True, COLOR_WHITE
+            )
+            rect = text.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT - 30))
+            self.screen.blit(text, rect)
+        except Exception:
+            pass
+
+        # ---- 调用 C 的组件 ----
+        if self.radar:
+            self.radar.render(self.screen, targets, dt_ms=16)
+        if self.hud:
+            self.hud.render(self.screen, state, int(self.clock.get_fps()), 16)
+        if self.effects:
+            self.effects.render(self.screen)
 
 
-# ==============================================
-#   直接运行此文件时的测试入口
-# ==============================================
-
+# ====== 测试入口 ======
 if __name__ == "__main__":
-    print("=== Real FPS UI 测试模式 ===")
-    print("按 ESC 或关闭窗口退出")
-    print()
-    print("提示：请先运行 ui/demo_emitter.py 来模拟主程序输出")
-    print()
-    
-    ui = UI(fullscreen=False)  # 窗口模式，方便调试
-    ui.start()
+    print("=== Real FPS UI ===")
+    print("按 ESC 退出")
+    UI(fullscreen=False).start()
 ```
 
 ---
 
-## 10. 第七步：demo_emitter.py — 自己模拟测试
+## 11. 常见问题
 
-写完 UI 后，你需要一个**模拟主程序**来测试。这个文件 C 队友会负责完善，但你先用下面这个简化版来验证窗口能打开、准星能显示。
-
-```python
-# ui/demo_emitter.py
-# 模拟主程序，每隔几秒输出不同的 JSON 状态
-# 运行方式：python ui/demo_emitter.py
-# 然后在另一个终端运行你的 UI（或者在同一终端运行后按 Ctrl+C 停止）
-
-import json
-import time
-import os
-import sys
-
-# 让 Python 能找到 ui 包
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-def write_status(data):
-    """把状态字典写入 state.json"""
-    with open("state.json", "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2)
-
-def demo_loop():
-    """模拟主程序状态变化"""
-    print("=== Demo Emitter 启动 ===")
-    print("每 3 秒切换一次状态场景")
-    print("按 Ctrl+C 停止\n")
-    
-        # ---- 引入开火事件发送器 ----
-    from fire_notifier import send_fire
-
-    # 场景 1：空闲（没有目标）
-    scene_idle = {
-        "timestamp": time.time(),
-        "system_state": {"mode": "idle", "msg": "等待目标"},
-        "score": {"value": 0},
-        "targets": [],
-        "serial": {"status": "OK", "msg": "connected"}
-    }
-    
-    # 场景 2：追踪（一个目标）
-    scene_tracking = {
-        "timestamp": time.time(),
-        "system_state": {"mode": "playing", "msg": "目标已发现"},
-        "score": {"value": 0},
-        "targets": [
-            {"id": 1, "bbox": [580, 300, 700, 420]}
-        ],
-        "serial": {"status": "OK", "msg": "connected"}
-    }
-    
-    # 场景 3：开火命中（通过 UDP 发送事件，不写在 JSON 里）
-    scene_firing = {
-        "timestamp": time.time(),
-        "system_state": {"mode": "playing", "msg": "命中！"},
-        "score": {"value": 50},
-        "targets": [
-            {"id": 1, "bbox": [610, 310, 670, 390]}
-        ],
-        "serial": {"status": "OK", "msg": "connected"}
-    }
-    
-    # 场景 4：串口断开
-    scene_error = {
-        "timestamp": time.time(),
-        "system_state": {"mode": "over", "msg": "串口连接断开"},
-        "score": {"value": 50},
-        "targets": [],
-        "serial": {"status": "ERROR", "msg": "disconnected"}
-    }
-    
-    scenes = [scene_idle, scene_tracking, scene_firing, scene_error]
-    scene_names = ["空闲", "追踪", "开火命中", "串口断开"]
-    
-    try:
-        while True:
-            for i, scene in enumerate(scenes):
-                print(f"  场景 {i+1}: {scene_names[i]}")
-                scene["timestamp"] = time.time()
-                write_status(scene)
-                
-                # ★ 场景 3 时通过 UDP 发送开火事件，模拟主程序
-                if i == 2:
-                    print("  → 发送 UDP 开火事件")
-                    send_fire(hit_zone="head", score_delta=50)
-                
-                time.sleep(3)
-    except KeyboardInterrupt:
-        print("\nDemo Emitter 已停止")
-
-if __name__ == "__main__":
-    demo_loop()
-```
-
-**测试步骤：**
-
-```powershell
-# 终端 1：启动摄像头服务（可选，没有也不影响测试）
-uvicorn vision.camera_share:app --port 8010 --host 127.0.0.1 --reload
-
-# 终端 2：启动模拟器
-python ui/demo_emitter.py
-
-# 终端 3：启动 UI
-python -c "from ui.core import UI; UI(fullscreen=False).start()"
-```
-
-> 摄像头服务不是必须的。没有它 UI 会显示黑色背景 + 提示文字，准星和 HUD 依然正常工作。
+| 问题 | 原因 | 解决 |
+|------|------|------|
+| `ModuleNotFoundError: No module named 'pygame'` | 没装 Pygame | `pip install pygame` |
+| `FileNotFoundError: state.json` | 还没启动主程序 | 先运行 `python start.py`，或自己建一个 |
+| 窗口一闪就关 | 代码有语法错误 | 看终端报错信息 |
+| 画面卡顿 FPS 低 | 主循环里有耗时操作 | 确保文件读取和网络请求在后台线程 |
+| 没有摄像头画面 | 没启动摄像头服务 | 运行 `uvicorn vision.camera_share:app --port 8010` |
+| 开火动画不触发 | UDP 监听没启动 | 检查 `FireListener` 是否调了 `start()` |
 
 ---
 
-## 11. 常见错误与解决
+## 🎯 你的学习路线
 
-### ❌ `ModuleNotFoundError: No module named 'pygame'`
-→ 没有安装 Pygame。运行 `pip install pygame`
+1. **运行 `ui/test_window.py`** — 确保 Pygame 能用 ✅
+2. **运行 `ui/test_draw.py`** — 学会画准星、目标框 ✅
+3. **理解 `state.json` 怎么读** — 第 6 节
+4. **理解 `FireListener` 怎么用** — 第 7 节
+5. **运行 `ui/core.py`** — 看到完整的 UI 🎉
+6. **和 C 对接** — 把 C 的雷达、HUD、动画组件集成进来
+7. **一起配合 `main.py` 和 `start.py` 测试完整流程**
 
-### ❌ `FileNotFoundError: state.json`
-→ 正常，第一次运行还没有状态文件。先启动 `demo_emitter.py`
-
-### ❌ 窗口一闪就关闭
-→ 检查代码中是否有缩进错误（Python 对缩进敏感）。
-   在终端中运行 Python 看报错信息。
-
-### ❌ 画面卡顿 / FPS 低
-→ 确保 `clock.tick(60)` 在主循环里。
-   检查后台线程是否在循环里做了耗时操作。
-
-### ❌ `pygame.error: video system not initialized`
-→ 忘记写 `pygame.init()` 或者在 `pygame.quit()` 之后调用了 Pygame 函数。
-
-### ❌ 四个角出现奇怪的线
-→ 可能是准星或目标框的位置计算错了，检查坐标值。
-
----
-
-## 给你的学习建议
-
-1. **先运行 test_window.py** — 确保 Pygame 能用
-2. **再运行 test_draw.py** — 理解绘图函数
-3. **然后运行 core.py** — 看看实际 UI 的样子
-4. **配合 demo_emitter.py** — 观察 JSON 状态变化时 UI 的变化
-5. **最后和 C 对接** — 把 C 的雷达、HUD、动画组件集成进来
-
-记住：**先让程序跑起来，再追求完美。** 有任何一个画面能显示，你就成功了一半。
-
-有问题随时找我！
+**记住：先让程序跑起来，再追求完美。能看到窗口显示出来，你就成功了 80%！💪**
