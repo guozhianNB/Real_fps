@@ -1,0 +1,37 @@
+# ui/assets.py — 资源工具
+# 字体缓存、半透明画板工具
+
+import pygame
+
+# ====== 字体缓存 ======
+_font_cache = {}
+
+def get_font(size, bold=False):
+    """获取指定大小的字体（带缓存）。"""
+    key = (size, bold)
+    if key not in _font_cache:
+        font = pygame.font.Font(None, size)
+        font.set_bold(bold)
+        _font_cache[key] = font
+    return _font_cache[key]
+
+def get_font_small():
+    """小号字体 (28px)。"""
+    return get_font(28)
+
+def get_font_large():
+    """大号字体 (48px)。"""
+    return get_font(48)
+
+def get_font_huge():
+    """超大号粗体 (72px)。"""
+    return get_font(72, bold=True)
+
+
+# ====== 半透明画板工具 ======
+
+def alpha_surface(w, h, color, alpha):
+    """创建半透明 Surface。"""
+    surf = pygame.Surface((w, h), pygame.SRCALPHA)
+    surf.fill((*color, alpha))
+    return surf

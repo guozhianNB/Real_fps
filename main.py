@@ -1,76 +1,88 @@
 '''
-主程序
-流程：
-广播GAME_START->调用vision.py,返回json数据->处理...
+主程序 — Real FPS 后端引擎
+============================
 
-
-vision返回JSON格式:
-{
-    "num":人数,
-    "box":{
-        id:[[(head_x1, head_y1), (head_x2, head_y2)],
-            [(body_x1, body_y1), (body_x2, body_y2),(body_x3, body_y3),(body_x4, body_y4)]]
-    }
-    "aim":{
-        "head":[瞄到头部的id],
-        "body":[瞄到身体的id]
-    }
-}
-
-main调用vision方法:
-from vision.vision import HumanTracker, get_camera_size
-
-tracker = HumanTracker()
-cam_w, cam_h = get_camera_size()
-aim = (cam_w // 2, cam_h // 2)
-
-while True:
-    data = tracker.get_analysis(aim)
-    # 处理 data... 使用 data["box"], data["aim"] 等
-
+职责：
+  1. 初始化摄像头、YOLO 跟踪器、串口、鼠标监听器
+  2. 主循环：视觉分析 → 开火检测 → 写入 state.json → 串口控制
+  3. 通过 UDP 广播实时通知 UI 开火事件
 
 通信架构：
-  - state.json → 只传递"状态"（模式、目标列表、分数）
-  - UDP 广播（端口 8099）→ 实时传递"事件"（开火、命中）
-  UI 后台运行 FireListener，收到开火事件立刻触发动画
+  - state.json  → 只传递"状态"（模式、目标列表、分数、串口状态）
+  - UDP 广播    → 实时传递"事件"（开火、命中），不经过 JSON
 
-state.json格式:
-{
-    "timestamp": 1717320000.0,
-    "system_state": {"mode": "playing", "msg": "normal"},
-    "score": {"value": 120},
-    "targets": [{"id": 3, "bbox": [600, 300, 680, 420]}],
-    "serial": {"status": "OK", "msg": "connected"}
-}
+vision 返回 JSON 格式:
+  {
+      "num": 人数,
+      "box": {
+          id: [[head_x1,head_y1,head_x2,head_y2],           # 头部矩形
+               [[x1,y1],[x2,y2],[x3,y3],[x4,y4]]]           # 身体四边形
+      },
+      "aim": {
+          "head": [瞄到头部的 id],
+          "body": [瞄到身体的 id]
+      }
+  }
+
+state.json 格式:
+  {
+      "timestamp": 1717320000.0,
+      "system_state": {"mode": "playing", "msg": "normal"},
+      "score": {"value": 120},
+      "targets": [{"id": 3, "bbox": [600, 300, 680, 420]}],
+      "serial": {"status": "OK", "msg": "connected"}
+  }
 
 UDP 事件格式（由 fire_notifier.py 发送）:
-{"event": "fire", "hit_zone": "head", "score_delta": 50, "timestamp": ...}
+  {"event": "fire", "hit_zone": "head", "score_delta": 50, "timestamp": ...}
 
 各字段含义：
-system_state.mode：当前状态 idle / playing / paused / over
-score.value：当前分数
-targets：所有检测到的目标列表
-serial.status：串口状态
+  system_state.mode → idle / playing / paused / over
+  score.value       → 当前分数
+  targets           → 所有检测到的目标列表
+  serial.status     → 串口状态 OK / ERROR
+
+UI 显示由 ui/core.py（Pygame）独立进程完成，本程序仅负责后端计算。
 '''
 
 import json
 import time
-import os
-from pathlib import Path
-import numpy as np
+import sys
 import pyee
-import cv2
 from vision.vision import HumanTracker, get_camera_size
-from vision.get_camera import get_camera_frame
 from fire_notifier import send_fire, close_sender
 from A_serial import SerialController
 from mouse import MouseListener
 
-# ============ state.json 写入工具 ============
-# state.json 只传递"状态"（模式、目标列表、串口状态）
-# "事件"（开火）走独立的 UDP 广播，实时通知 UI
+# ============================================================
+#  常量
+# ============================================================
 
 STATE_FILE = "state.json"
+
+# 鼠标灵敏度
+PITCH = 1.0   # 俯仰（Y 轴）
+YAW = 1.0     # 水平（X 轴）
+
+# 串口
+SERIAL_PORT = None        # None=自动检测，可指定如 "COM3"
+SERIAL_BAUDRATE = 115200
+
+# 开火冷却
+FIRE_COOLDOWN_MS = 100    # 两次开火最短间隔（毫秒）
+
+# 模式
+MODE_IDLE = "idle"
+MODE_PLAYING = "playing"
+MODE_PAUSED = "paused"
+MODE_OVER = "over"
+
+
+# ============================================================
+#  state.json 写入工具
+# ============================================================
+# state.json 只传递"状态"（模式、目标列表、串口状态）
+# "事件"（开火）走独立的 UDP 广播，实时通知 UI
 
 def write_state(system_state, score_value=0,
                 targets=None, serial_status="OK", serial_msg="connected"):
@@ -89,19 +101,9 @@ def write_state(system_state, score_value=0,
         print(f"[警告] 写入 state.json 失败: {e}")
 
 
-# -------------- 游戏状态管理 ----------------
-def start_game():
-    print("[状态] 游戏开始")
-    # 这里可以初始化一些全局资源，如串口连接、日志等
-
-def on_pause():
-    print("[状态] 游戏暂停")
-
-def on_continue():
-    print("[状态] 游戏继续")
-
-def on_game_over():
-    print("[状态] 游戏结束")
+# ============================================================
+#  摄像头就绪等待
+# ============================================================
 
 def wait_for_camera(max_retries=30, interval=0.5):
     """等待摄像头服务就绪，返回 (cam_w, cam_h) 或退出程序。"""
@@ -114,99 +116,123 @@ def wait_for_camera(max_retries=30, interval=0.5):
         print(f"  ...第 {attempt}/{max_retries} 次尝试")
         time.sleep(interval)
     print("[错误] 摄像头服务启动超时，请检查 uvicorn 是否正常运行。")
-    exit(1)
+    sys.exit(1)
 
 
-# -------------- 主程序逻辑 ----------------
-#=======标量=======
-PITCH = 1 #俯仰灵敏度
-YAW = 1 #水平灵敏度
-#=================
+# ============================================================
+#  串口初始化（带容错）
+# ============================================================
 
-def analysis(tracker, aim_point):
-    """分析单帧数据并处理结果。"""
-    data = tracker.get_analysis(aim_point)
-    if data["num"] > 0:
-        print(json.dumps(data, ensure_ascii=False))
-    # 这里可以根据 data["box"] 和 data["aim"] 的内容来控制游戏逻辑
+def init_serial(port, baudrate):
+    """尝试初始化串口，失败时返回 None（不阻塞启动）。"""
+    try:
+        ser = SerialController(port=port, baudrate=baudrate)
+        return ser
+    except RuntimeError as e:
+        print(f"[警告] 串口初始化失败（游戏仍可运行）: {e}")
+        return None
+
+
+# ============================================================
+#  主程序
+# ============================================================
 
 def main():
-    '''游戏主程序入口：后端计算。'''
+    """游戏主程序入口：后端计算。"""
 
-    # ===============1.初始化====================
+    # ===================== 1. 初始化 =====================
 
-    # 1a. 等待摄像头服务就绪后再开始游戏
+    # 1a. 等待摄像头服务就绪
     cam_w, cam_h = wait_for_camera()
     aim_point = (cam_w // 2, cam_h // 2)
 
-    # 1b. 启动跟踪器并等待第一帧确认
+    # 1b. 启动 YOLO 跟踪器
     print("[等待] 正在启动 YOLO 跟踪器...")
     tracker = HumanTracker()
-    
-    # 1c. 其他初始化
-    # serial = SerialController( baudrate=115200)  # TODO: 根据实际情况修改串口参数
-    v_x=0
-    v_y=0 #视角角度，
 
-    # 1d. 键鼠监听初始化（后台线程已自动启动，等待 GAME_START）
-    ml = MouseListener(sensitivity=1.0, deadzone=2, smooth_window=3, center_lock=True)
-    game_running = True  # 控制主循环
+    # 1c. 初始化串口（非必须，失败不阻塞）
+    serial = init_serial(SERIAL_PORT, SERIAL_BAUDRATE)
+    v_x = 0  # 累积水平视角
+    v_y = 0  # 累积俯仰视角
 
-    # 订阅键鼠事件
-    def on_mouse_pause():
+    # 1d. 鼠标监听器（后台线程自动启动，start() 后开始采集）
+    ml = MouseListener(
+        sensitivity=1.0, deadzone=2,
+        smooth_window=3, center_lock=True,
+    )
+    game_running = True
+    current_mode = MODE_PLAYING  # 初始为 playing
+
+    # 1e. 游戏状态机 —— 统一管理状态转换
+    emitter = pyee.EventEmitter()
+
+    @emitter.on("GAME_START")
+    def on_start():
+        nonlocal current_mode
+        current_mode = MODE_PLAYING
+        print("[状态] 游戏开始")
+
+    @emitter.on("GAME_PAUSE")
+    def on_pause():
+        nonlocal current_mode
+        current_mode = MODE_PAUSED
         ml.pause()
-        on_pause()
-    def on_mouse_continue():
+        print("[状态] 游戏暂停")
+
+    @emitter.on("GAME_CONTINUE")
+    def on_continue():
+        nonlocal current_mode
+        current_mode = MODE_PLAYING
         ml.resume()
-        on_continue()
-    def on_mouse_over():
-        nonlocal game_running
+        print("[状态] 游戏继续")
+
+    @emitter.on("GAME_OVER")
+    def on_over():
+        nonlocal game_running, current_mode
+        current_mode = MODE_OVER
         game_running = False
         ml.stop()
-        on_game_over()
+        if serial:
+            serial.close()
+        print("[状态] 游戏结束")
 
-    ml.emitter.on("GAME_PAUSE", on_mouse_pause)
-    ml.emitter.on("GAME_CONTINUE", on_mouse_continue)
-    ml.emitter.on("GAME_OVER", on_mouse_over)
+    # 鼠标键盘事件 → 转发到统一状态机
+    ml.emitter.on("GAME_PAUSE", lambda: emitter.emit("GAME_PAUSE"))
+    ml.emitter.on("GAME_CONTINUE", lambda: emitter.emit("GAME_CONTINUE"))
+    ml.emitter.on("GAME_OVER", lambda: emitter.emit("GAME_OVER"))
 
-    # 最后. 广播 GAME_START（此时所有模块均已就绪）
-    state = pyee.EventEmitter()
-    state.on("GAME_START", start_game)
-    state.on("GAME_PAUSE", on_pause)
-    state.on("GAME_CONTINUE", on_continue)
-    state.on("GAME_OVER", on_game_over)
-    state.emit("GAME_START")
-
-    # ★ 通知鼠标监听器开始采集
+    # 发射 GAME_START（所有模块就绪）
+    emitter.emit("GAME_START")
     ml.start()
-    # ===============2.主循环====================
-    print("[状态] 进入主循环，按 Ctrl+C 退出")
 
-    # 游戏状态
+    # ===================== 2. 主循环 =====================
+
+    print("[状态] 进入主循环（显示由 Pygame UI 独立渲染）")
+    print("  按键:  P=暂停/继续  Esc=退出  Ctrl+C=强制退出")
+
     score_value = 0
-    prev_fire_counter = 0
     last_hit_time = 0
-    FIRE_COOLDOWN_MS = 100  # 两次开火最短间隔（毫秒），模拟射速
 
     try:
         while game_running:
             now_ms = time.time() * 1000
 
-            # ---- 从鼠标监听器获取输入 ----
+            # ---- 2a. 鼠标输入 ----
             dx, dy, left_pressed = ml.get_delta()
 
-            # ---- 2a. 视觉分析 ----
+            # ---- 2b. 视觉分析 ----
             data = tracker.get_analysis(aim_point)
 
-            # ---- 2b. 开火检测（使用鼠标左键） ----
-            # 开火事件通过 UDP 实时通知 UI，不经过 state.json
-            on_target = data["num"] > 0 and (
-                len(data["aim"]["head"]) > 0 or len(data["aim"]["body"]) > 0
+            # ---- 2c. 开火检测 ----
+            on_target = (
+                data["num"] > 0
+                and (len(data["aim"]["head"]) > 0 or len(data["aim"]["body"]) > 0)
             )
+            # 左键按下 + 准星指向目标 → 开火
+
             if left_pressed and on_target and (now_ms - last_hit_time) >= FIRE_COOLDOWN_MS:
                 last_hit_time = now_ms
 
-                # 判断命中部位
                 if len(data["aim"]["head"]) > 0:
                     hit_zone = "head"
                     score_delta = 50
@@ -217,46 +243,61 @@ def main():
                 score_value += score_delta
                 print(f"[击中] {hit_zone}  +{score_delta}  总分:{score_value}")
 
-                # ★ UDP 实时通知 UI，不阻塞，不经过 JSON
+                # UDP 实时通知 UI
                 send_fire(hit_zone=hit_zone, score_delta=score_delta)
+            # 左键按下 + 没有击中 → 开火，但不加分（可用于训练瞄准）
+            elif left_pressed and not on_target and (now_ms - last_hit_time) >= FIRE_COOLDOWN_MS:
+                last_hit_time = now_ms
+                print("[开火] 未击中目标")
+                send_fire(hit_zone=None, score_delta=0)
 
-            # ---- 2c. 写入 state.json（只含状态，不含事件） ----
+            # ---- 2d. 目标列表（用于写入 state.json） ----
             targets_json = []
             for tid_str, box_data in data["box"].items():
+                # box_data[0] = 头部矩形 [x1,y1,x2,y2]
                 targets_json.append({
                     "id": int(tid_str),
                     "bbox": box_data[0],
                 })
 
+            # ---- 2e. 串口状态 ----
+            if serial and serial.connected:
+                ser_status = "OK"
+                ser_msg = "connected"
+            elif serial:
+                ser_status = "ERROR"
+                ser_msg = serial.last_msg
+            else:
+                ser_status = "ERROR"
+                ser_msg = "not initialized"
+
+            # ---- 2f. 写入 state.json ----
             write_state(
-                system_state={"mode": "playing", "msg": "normal"},
+                system_state={"mode": current_mode, "msg": "normal"},
                 score_value=score_value,
                 targets=targets_json,
+                serial_status=ser_status,
+                serial_msg=ser_msg,
             )
 
-            # ---- 2d. 显示帧（调试用） ----
-            frame = get_camera_frame()
-            if frame is not None:
-                cv2.circle(frame, aim_point, 5, (0, 255, 0), -1)
-                cv2.imshow("Frame", frame)
-            if cv2.waitKey(1) & 0xFF in (ord("q"), 27):
-                break
-
-            # ---- 2e. 视角控制（使用鼠标位移） ----
-            v_x += dx * YAW
-            v_y += dy * PITCH
-            # serial.send_errors(int(v_x), int(v_y))
+            # ---- 2g. 视角控制（鼠标位移 → 云台误差） ----
+            if current_mode == MODE_PLAYING:
+                v_x += dx * YAW
+                v_y += dy * PITCH
+                if serial and serial.connected:
+                    serial.send_errors(int(v_x), int(v_y))
 
             time.sleep(0.03)
 
     except KeyboardInterrupt:
-        pass
+        print("\n[中断] 用户强制退出")
     finally:
         ml.stop()
-        cv2.destroyAllWindows()
+        if serial:
+            serial.close()
         tracker.release()
-        close_sender()  # 关闭 UDP 发送端
-        print("\n[退出] 程序已终止")
+        close_sender()
+        print("[退出] 程序已终止")
 
 
 

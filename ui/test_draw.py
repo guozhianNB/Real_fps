@@ -1,5 +1,6 @@
 # ui/test_draw.py
 # 学习如何在窗口上画各种图形
+# 参考 B_pygame.md 第 5 节
 
 import pygame
 import sys

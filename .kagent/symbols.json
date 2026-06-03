@@ -38,30 +38,21 @@
     },
     "main.py": {
       "ipo_ts": 1780409237601,
-      "edit_count": 55,
-      "last_lines": 278,
-      "last_ts": 1780473114664,
+      "edit_count": 58,
+      "last_lines": 319,
+      "last_ts": 1780475941287,
       "delisted": false,
       "last_source": "onSave",
-      "last_content_hash": "2e48c9c"
+      "last_content_hash": "68fcd31e"
     },
     "start.py": {
       "ipo_ts": 1780409882174,
-      "edit_count": 12,
-      "last_lines": 37,
-      "last_ts": 1780464566581,
+      "edit_count": 16,
+      "last_lines": 110,
+      "last_ts": 1780476157896,
       "delisted": false,
       "last_source": "onSave",
-      "last_content_hash": "5468d860"
-    },
-    "ui.py": {
-      "ipo_ts": 1780412959278,
-      "edit_count": 3,
-      "last_lines": 94,
-      "last_ts": 1780473663884,
-      "delisted": false,
-      "last_source": "onSave",
-      "last_content_hash": "fa369c8d"
+      "last_content_hash": "b239e12b"
     },
     "教学参考文档/B_pygame.md": {
       "ipo_ts": 1780463770834,
@@ -116,6 +107,87 @@
       "delisted": false,
       "last_source": "onSave",
       "last_content_hash": "9a5a6b13"
+    },
+    "ui/__init__.py": {
+      "ipo_ts": 1780474978332,
+      "edit_count": 2,
+      "last_lines": 1,
+      "last_ts": 1780474978386,
+      "delisted": false,
+      "last_source": "onSave",
+      "last_content_hash": "2d4c624c"
+    },
+    "ui/config.py": {
+      "ipo_ts": 1780474978388,
+      "edit_count": 2,
+      "last_lines": 33,
+      "last_ts": 1780474978424,
+      "delisted": false,
+      "last_source": "onSave",
+      "last_content_hash": "13699d75"
+    },
+    "ui/assets.py": {
+      "ipo_ts": 1780474978426,
+      "edit_count": 2,
+      "last_lines": 37,
+      "last_ts": 1780474978454,
+      "delisted": false,
+      "last_source": "onSave",
+      "last_content_hash": "33fb89b2"
+    },
+    "ui/radar.py": {
+      "ipo_ts": 1780474999733,
+      "edit_count": 2,
+      "last_lines": 115,
+      "last_ts": 1780474999838,
+      "delisted": false,
+      "last_source": "onSave",
+      "last_content_hash": "a2ae7f27"
+    },
+    "ui/hud.py": {
+      "ipo_ts": 1780474999850,
+      "edit_count": 2,
+      "last_lines": 121,
+      "last_ts": 1780474999916,
+      "delisted": false,
+      "last_source": "onSave",
+      "last_content_hash": "f51986ea"
+    },
+    "ui/effects.py": {
+      "ipo_ts": 1780474999924,
+      "edit_count": 2,
+      "last_lines": 169,
+      "last_ts": 1780474999993,
+      "delisted": false,
+      "last_source": "onSave",
+      "last_content_hash": "6a12d14b"
+    },
+    "ui/core.py": {
+      "ipo_ts": 1780475023439,
+      "edit_count": 2,
+      "last_lines": 275,
+      "last_ts": 1780475023500,
+      "delisted": false,
+      "last_source": "onSave",
+      "last_content_hash": "6047771e"
+    },
+    "ui/demo_reader.py": {
+      "ipo_ts": 1780475023497,
+      "edit_count": 2,
+      "last_lines": 180,
+      "last_ts": 1780475023554,
+      "delisted": false,
+      "last_source": "onSave",
+      "last_content_hash": "e075ff77"
+    },
+    "ui/test_draw.py": {
+      "ipo_ts": 1780475092406,
+      "edit_count": 2,
+      "last_lines": 95,
+      "last_ts": 1780475092461,
+      "delisted": false,
+      "last_source": "onSave",
+      "last_content_hash": "9ed129f5"
     }
   }
 }
