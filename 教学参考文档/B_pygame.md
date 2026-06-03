@@ -117,19 +117,24 @@ python -c "import pygame; print('Pygame 版本:', pygame.version.ver)"
 
 ```
 Real_fps/
-├── ui/                       ← 你和 C 的工作目录
-│   ├── __init__.py           ← 让 ui/ 成为一个 Python 包（内容可为空）
-│   ├── config.py             ← 你和 C 共用的颜色、位置常量
-│   ├── core.py               ← 你的核心文件：UI 主循环
-│   ├── radar.py              ← C 负责：雷达组件
-│   ├── hud.py                ← C 负责：HUD 面板
-│   ├── effects.py            ← C 负责：命中动画
-│   ├── demo_emitter.py       ← C 负责：模拟器测试脚本
-│   └── assets.py             ← C 负责：字体等资源加载
-├── D_mouse.py                ← D 队友的鼠标监听模块
-├── main.py                   ← 之后主程序会从这里启动
-├── readme.md                 ← 项目说明
-└── requirement.txt           ← 依赖清单（已更新）
+├── ui/                         ← 你和 C 的工作目录（需手动创建）
+│   ├── __init__.py             ← 让 ui/ 成为 Python 包（内容为空）
+│   ├── config.py               ← 你和 C 共用的颜色、位置常量
+│   ├── core.py                 ← 你的核心文件：UI 主循环
+│   ├── radar.py                ← C 负责：雷达组件
+│   ├── hud.py                  ← C 负责：HUD 面板
+│   ├── effects.py              ← C 负责：命中动画
+│   ├── demo_emitter.py         ← C 负责：模拟器测试脚本
+│   └── assets.py               ← C 负责：字体等资源加载
+├── vision/                     ← 视觉模块（已实现）
+│   ├── camera_share.py         ← FastAPI 摄像头共享服务（端口 8010）
+│   ├── vision.py               ← YOLO 人体跟踪 + 分析
+│   └── get_camera.py           ← 获取摄像头画面的工具函数
+├── main.py                     ← 主程序入口
+├── start.py                    ← 启动器（一键启动摄像头服务 + 主程序）
+├── A_serial.py                 ← 串口通信
+├── readme.md
+└── requirement.txt
 ```
 
 **请先在 `Real_fps` 文件夹下手动创建 `ui` 文件夹。**
@@ -484,73 +489,99 @@ for i in range(5):
 > ⚠️ **重要：摄像头画面不放在 state.json 里！**
 > 它走独立的 FastAPI 服务，UI 通过 HTTP 拉取 JPEG 图片。
 
-### camera_share.py 是什么？
+### 摄像头画面从哪来？
 
-队友在项目根目录下提供了一个 `camera_share.py`，它是一个**独立的摄像头服务**：
+项目已经提供了两种获取摄像头画面的方式：
+
+#### 方式一：`vision/get_camera.py`（推荐 — 最简单）
+
+```python
+from vision.get_camera import get_camera_frame, get_camera_size
+
+# 获取摄像头画面尺寸
+w, h = get_camera_size()  # 返回 (width, height)
+
+# 获取最新一帧（返回 OpenCV BGR 图像）
+frame = get_camera_frame()
+if frame is not None:
+    # frame 就是 numpy 数组，可直接用
+    cv2.imshow("camera", frame)
+```
+
+#### 方式二：`vision/vision.py` 的 `HumanTracker`
+
+```python
+from vision.vision import HumanTracker
+
+tracker = HumanTracker()  # 自动后台拉取 + YOLO 跟踪
+frame, result, _ = tracker.get_latest()
+```
+
+### camera_share.py 在哪里？
+
+摄像头共享服务位于 `vision/camera_share.py`，它是一个 **FastAPI 服务**：
 
 ```
-camera_share.py
+vision/camera_share.py
   └── FastAPI 服务 (端口 8010)
-       └── GET /snapshot → 返回最新摄像头帧的 JPEG 图片
+       ├── GET /snapshot → 返回最新帧的 JPEG 图片
+       └── GET /size     → 返回 {"width": W, "height": H}
 ```
-
-它做的事情：
-1. 打开你的摄像头（USB 摄像头或笔记本内置摄像头）
-2. 在后台线程中持续采集画面
-3. 当你访问 `http://127.0.0.1:8010/snapshot` 时，返回最新一帧的 JPEG
 
 ### 如何启动它？
 
-你需要**另开一个终端**，先启动摄像头服务：
-
+**方式一：用 start.py 一键启动（推荐）**
 ```powershell
-# 终端 1：启动摄像头服务
-uvicorn camera_share:app --port 8010 --host 127.0.0.1 --reload
+python start.py
 ```
+这会自动启动 uvicorn + 主程序。
 
-看到输出 `摄像头服务已启动` 就说明成功了。
+**方式二：手动启动**
+```powershell
+# 新开一个终端
+uvicorn vision.camera_share:app --port 8010 --host 127.0.0.1 --reload
+```
 
 ### 你的 UI 怎么拿到画面？
 
-你的 `core.py` 已经集成了摄像头拉取线程。它会：
-1. 每 33ms 访问一次 `http://127.0.0.1:8010/snapshot`
-2. 拿到 JPEG → 解码为 numpy 数组 → 放入队列
-3. 主循环从队列取出 → 转为 Pygame Surface → 铺满全屏
+你的 `core.py` 可以集成摄像头拉取线程。它会：
+1. 每 33ms 调用 `get_camera_frame()` 获取最新画面
+2. 拿到 numpy 数组 → 转为 Pygame Surface → 铺满全屏
 
-整个流程：
+```python
+import cv2
+from vision.get_camera import get_camera_frame
 
-```
-camera_share.py         你的 UI (core.py)
-  │                          │
-  │ 启动后持续采集摄像头      │
-  │                          │
-  │   GET /snapshot ◄─────── │ 每 33ms 拉取一次
-  │   ──── JPEG ──────────► │
-  │                          │ 解码 → 转为 Surface
-  │                          │ → blit 到屏幕背景
+frame = get_camera_frame()
+if frame is not None:
+    # BGR → RGB
+    frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+    # numpy → Pygame Surface
+    frame_surface = pygame.surfarray.make_surface(frame_rgb.swapaxes(0, 1))
+    frame_surface = pygame.transform.scale(frame_surface, (WIDTH, HEIGHT))
+    screen.blit(frame_surface, (0, 0))
 ```
 
 ### 测试步骤
 
 ```powershell
+# 终端 1：一键启动摄像头服务 + 主程序
+python start.py
+
+# 或者分开启动：
 # 终端 1：启动摄像头服务
-uvicorn camera_share:app --port 8010 --host 127.0.0.1 --reload
+uvicorn vision.camera_share:app --port 8010 --host 127.0.0.1 --reload
 
-# 终端 2：启动状态模拟器
-python ui/demo_emitter.py
-
-# 终端 3：启动 UI
+# 终端 2：启动 UI
 python -c "from ui.core import UI; UI(fullscreen=False).start()"
 ```
-
-这样你就能看到**摄像头画面作为背景 + 准星/HUD 叠加在上面**的效果了。
 
 ### 如果摄像头启动失败怎么办？
 
 - 检查摄像头是否被其他程序占用（如 Zoom、OBS）
 - 尝试换个 USB 口
-- 如果还是没有画面，UI 会显示黑色背景 + 提示文字，不会崩溃
-- 可以在 `camera_share.py` 中修改 `camera_id=0` 为 `camera_id=1` 试试另一个摄像头
+- 可以在 `vision/camera_share.py` 中修改 `camera_id=0` 为 `camera_id=1`
+- 没有摄像头画面时 UI 会显示黑色背景 + 提示文字，不会崩溃
 
 ---
 
@@ -741,7 +772,7 @@ class UI:
         解码后放入队列供主循环使用。
         
         camera_share 运行方式（需另开终端）：
-            uvicorn camera_share:app --port 8010 --host 127.0.0.1 --reload
+            uvicorn vision.camera_share:app --port 8010 --host 127.0.0.1 --reload
         """
         import requests  # 注意：需要 pip install requests
         import io
@@ -772,7 +803,7 @@ class UI:
                 except requests.ConnectionError:
                     fail_count += 1
                     if fail_count == 1:  # 只在第一次报错
-                        print("[UI] 摄像头服务未启动，请运行: uvicorn camera_share:app --port 8010")
+                        print("[UI] 摄像头服务未启动，请运行: uvicorn vision.camera_share:app --port 8010")
                 except Exception as e:
                     fail_count += 1
                     if fail_count == 1:
@@ -1140,7 +1171,7 @@ if __name__ == "__main__":
 
 ```powershell
 # 终端 1：启动摄像头服务（可选，没有也不影响测试）
-uvicorn camera_share:app --port 8010 --host 127.0.0.1 --reload
+uvicorn vision.camera_share:app --port 8010 --host 127.0.0.1 --reload
 
 # 终端 2：启动模拟器
 python ui/demo_emitter.py

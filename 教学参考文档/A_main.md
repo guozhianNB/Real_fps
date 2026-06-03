@@ -7,21 +7,22 @@
 ## 职责总览
 
 ```
-                 ┌─────────────┐
-                 │   D_mouse   │  ← 提供 dx, dy, left_click
-                 └──────┬──────┘
-                        │ get_delta()
-                        ▼
-┌────────────┐   ┌──────────────┐   ┌──────────┐
-│  Vision    │──►│   A_main     │──►│  Serial  │  → 串口指令
-│ (YOLO)     │   │  (状态机)    │   │ (串口)   │
-└────────────┘   └──────┬───────┘   └──────────┘
-                        │ write state.json
-                        ▼
-                 ┌─────────────┐
-                 │  B (UI)     │  ← 每 50ms 轮询 state.json
-                 │  + C (组件) │
-                 └─────────────┘
+                 ┌──────────────────┐
+                 │   D_mouse        │  ← 提供 dx, dy, left_click
+                 └───────┬──────────┘
+                         │ get_delta()
+                         ▼
+┌──────────────────┐   ┌──────────────┐   ┌──────────┐
+│  vision/vision.py│──►│   main.py    │──►│  Serial  │  → 串口指令
+│  HumanTracker    │   │  (状态机)     │   │ (串口)   │
+│  process_frame() │   └──────┬───────┘   └──────────┘
+└──────────────────┘          │ write state.json
+                              ▼
+                       ┌─────────────┐
+                       │  ui/ (B+C)  │  ← 每 50ms 轮询 state.json
+                       │  准星/雷达   │
+                       │  HUD/动画   │
+                       └─────────────┘
 ```
 
 ---
@@ -153,20 +154,28 @@ def update_score(hit_zone, now_ms):
 
 ---
 
-## 文件结构建议
+## 实际项目结构
 
 ```
 Real_fps/
-├── main.py              ← 入口：初始化所有模块，启动主循环
-├── A_main.py            ← 主循环 + 状态机 + 评分逻辑（可单独测试）
-├── A_vision.py          ← YOLO 检测封装
-├── A_serial.py          ← 串口通信封装
-├── D_mouse.py           ← D 的鼠标模块
-├── ui/                  ← B + C 的 UI 模块
-├── state.json           ← 运行时生成
-└── arduino/             ← 单片机代码
-    └── servo_control.ino
+├── main.py                    ← 入口：主循环 + 状态机 + 评分逻辑
+├── start.py                   ← 启动器（一键启动摄像头服务 + 主程序）
+├── A_serial.py                ← 串口通信封装
+├── vision/                    ← 视觉模块（已实现）
+│   ├── camera_share.py        ← FastAPI 摄像头共享服务（端口 8010）
+│   ├── vision.py              ← YOLO 人体跟踪 + 分析（HumanTracker + process_frame）
+│   └── get_camera.py          ← 获取摄像头画面的工具函数
+├── ui/                        ← B + C 的 UI 模块（需手动创建）
+├── D_mouse.py                 ← D 的鼠标模块（待实现）
+├── 教学参考文档/               ← 各模块教学文档
+├── readme.md
+└── requirement.txt
 ```
+
+> ⚠️ **注意：**
+> - Vision 模块在 `vision/` 文件夹下，调用时用 `from vision.vision import HumanTracker`
+> - 摄像头服务用 `uvicorn vision.camera_share:app ...`（带 `vision.` 前缀）
+> - 画面获取已封装在 `vision/get_camera.py` 中：`get_camera_frame()`、`get_camera_size()`
 
 ---
 

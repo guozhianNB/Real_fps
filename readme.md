@@ -301,11 +301,13 @@ pip install pygame pynput pyee ultralytics opencv-python pyserial uvicorn fastap
 ```
 Real_fps/
 ├── main.py                  ← 你：主程序入口
-├── camera_share.py          ← 你：摄像头 FastAPI 服务
-├── D_mouse.py               ← D：鼠标键盘监听
-├── mouse_test.py            ← D：测试脚本
-├── state.json               ← 运行时生成
-├── ui/
+├── start.py                 ← 你：启动器（一键启动）
+├── A_serial.py              ← 你：串口通信
+├── vision/                  ← 视觉模块
+│   ├── camera_share.py      ← FastAPI 摄像头服务
+│   ├── vision.py            ← YOLO 人体跟踪
+│   └── get_camera.py        ← 画面获取工具
+├── ui/                      ← B + C 的 UI 模块（需手动创建）
 │   ├── __init__.py
 │   ├── core.py              ← B：UI 主循环
 │   ├── config.py            ← C：颜色/位置常量
@@ -314,8 +316,9 @@ Real_fps/
 │   ├── hud.py               ← C：HUD 面板
 │   ├── effects.py           ← C：命中动画
 │   └── demo_reader.py       ← C：自测入口
-├── A_vision.md / A_main.md / A_serial.md / A_mcu.md
-├── B_pygame.md / C_ui_assist.md / D_mouse.md
+├── 教学参考文档/
+│   ├── A_main.md / A_vision.md / A_serial.md / A_mcu.md
+│   ├── B_pygame.md / C_ui_assist.md / D_mouse.md
 ├── readme.md
 └── requirement.txt
 ```
@@ -328,7 +331,7 @@ Real_fps/
 pip install -r requirement.txt
 
 # 终端 1：摄像头服务
-uvicorn camera_share:app --port 8010 --host 127.0.0.1 --reload
+uvicorn vision.camera_share:app --port 8010 --host 127.0.0.1 --reload
 
 # 终端 2：模拟状态
 python ui/demo_reader.py

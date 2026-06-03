@@ -110,16 +110,21 @@ python -c "import pygame; print('Pygame 版本:', pygame.version.ver)"
 
 ```
 Real_fps/
-├── ui/
-│   ├── __init__.py       ← 空文件（让 ui/ 成为 Python 包）
-│   ├── config.py         ← 你写：颜色、位置、尺寸常量（和 B 共用）
-│   ├── assets.py         ← 你写：字体加载工具
-│   ├── radar.py          ← 你写：雷达组件 ⭐ 主要
-│   ├── hud.py            ← 你写：HUD 面板 ⭐ 主要
-│   ├── effects.py        ← 你写：命中/击杀动画 ⭐ 主要
-│   ├── demo_reader.py    ← 你写：自测入口 ⭐ 主要
-│   └── core.py           ← B 写：UI 主循环
-├── state.json            ← 运行时生成：主程序写的状态数据
+├── ui/                         ← 你和 B 的工作目录（需手动创建）
+│   ├── __init__.py             ← 空文件（让 ui/ 成为 Python 包）
+│   ├── config.py               ← 颜色、位置、尺寸常量（和 B 共用）
+│   ├── assets.py               ← 字体加载工具
+│   ├── radar.py                ← 你写：雷达组件 ⭐ 主要
+│   ├── hud.py                  ← 你写：HUD 面板 ⭐ 主要
+│   ├── effects.py              ← 你写：命中/击杀动画 ⭐ 主要
+│   ├── demo_reader.py          ← 你写：自测入口 ⭐ 主要
+│   └── core.py                 ← B 写：UI 主循环
+├── vision/                     ← 视觉模块（已实现，含有摄像头工具）
+│   ├── camera_share.py         ← FastAPI 摄像头共享服务（端口 8010）
+│   ├── vision.py               ← YOLO 人体跟踪
+│   └── get_camera.py           ← 获取摄像头画面的工具函数
+├── main.py                     ← 主程序入口
+├── start.py                    ← 启动器
 ├── readme.md
 └── requirement.txt
 ```
@@ -1045,9 +1050,18 @@ i/demo_reader.py` — 自测入口
 
 **B 也可以用这个文件测试整体 UI。**
 
-> 💡 **关于摄像头画面：** 摄像头走独立的 FastAPI 服务（`camera_share.py`，端口 8010），
+> 💡 **关于摄像头画面：** 摄像头走独立的 FastAPI 服务（`vision/camera_share.py`，端口 8010），
 > B 的 `core.py` 会通过 HTTP 拉取 JPEG 图片作为窗口背景。
 > 你的组件（雷达、HUD、动画）始终叠加在背景之上，不需要关心摄像头画面本身。
+>
+> 如果你自测时需要获取摄像头画面，可以直接使用 `vision/get_camera.py` 提供的工具函数：
+> ```python
+> from vision.get_camera import get_camera_frame, get_camera_size
+>
+> w, h = get_camera_size()            # → (width, height)
+> frame = get_camera_frame()          # → OpenCV BGR numpy 数组
+> ```
+> 启动摄像头服务：`uvicorn vision.camera_share:app --port 8010 --host 127.0.0.1 --reload`
 
 ```python
 # ui/demo_reader.py

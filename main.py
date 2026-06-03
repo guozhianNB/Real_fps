@@ -18,7 +18,7 @@ vision返回JSON格式:
 }
 
 main调用vision方法:
-from vision import HumanTracker, get_camera_size
+from vision.vision import HumanTracker, get_camera_size
 
 tracker = HumanTracker()
 cam_w, cam_h = get_camera_size()
