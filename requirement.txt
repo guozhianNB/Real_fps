@@ -18,3 +18,4 @@ opencv-python
 ultralytics
 PyOpenGL
 PyOpenGL_accelerate
+opencv-contrib-python
