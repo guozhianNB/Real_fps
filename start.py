@@ -17,7 +17,7 @@ def start():
     # 用 uvicorn 在后台启动摄像头共享服务
     # 不捕获 stdout/stderr，避免管道阻塞导致卡死
     camera_process = subprocess.Popen(
-        [sys.executable, "-m", "uvicorn", "camera_share:app",
+        [sys.executable, "-m", "uvicorn", "vision.camera_share:app",
          "--host", "127.0.0.1", "--port", "8010"],
         stdout=None, stderr=None
     )
