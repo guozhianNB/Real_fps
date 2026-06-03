@@ -23,7 +23,7 @@ def start():
     print("[启动] 正在启动摄像头服务...")
     camera_process = subprocess.Popen(
         [sys.executable, "-m", "uvicorn", "vision.camera_share:app",
-         "--host", "127.0.0.1", "--port", "8010"],
+         "--host", "127.0.0.1", "--port", "8010","--log-level","warning"],
         stdout=None, stderr=None,
     )
     time.sleep(2)  # 等待 uvicorn 就绪
@@ -58,7 +58,7 @@ window.geometry("420x320")
 window.resizable(False, False)
 
 # ====== 全局状态（必须在 Tk() 之后创建） ======
-_launch_ui = tk.BooleanVar(value=False)  # 默认 不启动 UI
+_launch_ui = tk.BooleanVar(value=True)  # 默认 启动 UI
 
 # 标题
 tk.Label(

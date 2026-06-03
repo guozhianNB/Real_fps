@@ -30,6 +30,7 @@ state.json 格式:
       "system_state": {"mode": "playing", "msg": "normal"},
       "score": {"value": 120},
       "targets": [{"id": 3, "bbox": [600, 300, 680, 420]}],
+      "camera_size":(1080,960)
       "serial": {"status": "OK", "msg": "connected"}
   }
 
@@ -46,6 +47,7 @@ UI 显示由 ui/core.py（Pygame）独立进程完成，本程序仅负责后端
 '''
 
 import json
+import math
 import time
 import sys
 import pyee
@@ -85,13 +87,15 @@ MODE_OVER = "over"
 # "事件"（开火）走独立的 UDP 广播，实时通知 UI
 
 def write_state(system_state, score_value=0,
-                targets=None, serial_status="OK", serial_msg="connected"):
+                targets=None, serial_status="OK", serial_msg="connected",
+                camera_size=None):
     """写入 state.json。开火事件已独立到 UDP，不在此传递。"""
     state = {
         "timestamp": time.time(),
         "system_state": system_state,
         "score": {"value": score_value},
         "targets": targets or [],
+        "camera_size": camera_size or [0, 0],
         "serial": {"status": serial_status, "msg": serial_msg},
     }
     try:
@@ -152,8 +156,8 @@ def main():
 
     # 1c. 初始化串口（非必须，失败不阻塞）
     serial = init_serial(SERIAL_PORT, SERIAL_BAUDRATE)
-    v_x = 0  # 累积水平视角
-    v_y = 0  # 累积俯仰视角
+    v_x = 0  # 云台 yaw 角目标 (-90~90)
+    v_y = 0  # 云台 pitch 角目标 (-90~90)
 
     # 1d. 鼠标监听器（后台线程自动启动，start() 后开始采集）
     ml = MouseListener(
@@ -229,35 +233,57 @@ def main():
                 and (len(data["aim"]["head"]) > 0 or len(data["aim"]["body"]) > 0)
             )
             # 左键按下 + 准星指向目标 → 开火
-
-            if left_pressed and on_target and (now_ms - last_hit_time) >= FIRE_COOLDOWN_MS:
+            if left_pressed and (now_ms - last_hit_time) >= FIRE_COOLDOWN_MS:
                 last_hit_time = now_ms
+                v_y += 10               #模拟后坐力
 
-                if len(data["aim"]["head"]) > 0:
-                    hit_zone = "head"
-                    score_delta = 50
+                if on_target:
+                    if len(data["aim"]["head"]) > 0:
+                        hit_zone = "head"
+                        score_delta = 50
+                    else:
+                        hit_zone = "body"
+                        score_delta = 10
+
+                    score_value += score_delta
+                    print(f"[击中] {hit_zone}  +{score_delta}  总分:{score_value}")
+
+                    # UDP 实时通知 UI
+                    send_fire(hit_zone=hit_zone, score_delta=score_delta)
                 else:
-                    hit_zone = "body"
-                    score_delta = 10
-
-                score_value += score_delta
-                print(f"[击中] {hit_zone}  +{score_delta}  总分:{score_value}")
-
-                # UDP 实时通知 UI
-                send_fire(hit_zone=hit_zone, score_delta=score_delta)
-            # 左键按下 + 没有击中 → 开火，但不加分（可用于训练瞄准）
-            elif left_pressed and not on_target and (now_ms - last_hit_time) >= FIRE_COOLDOWN_MS:
-                last_hit_time = now_ms
-                print("[开火] 未击中目标")
-                send_fire(hit_zone=None, score_delta=0)
+                    # 左键按下 + 没有击中 → 开火，但不加分（可用于训练瞄准）
+                    print("[开火] 未击中目标")
+                    send_fire(hit_zone=None, score_delta=0)
 
             # ---- 2d. 目标列表（用于写入 state.json） ----
             targets_json = []
             for tid_str, box_data in data["box"].items():
                 # box_data[0] = 头部矩形 [x1,y1,x2,y2]
+                # box_data[1] = 身体四边形 [[左肩],[右肩],[右胯],[左胯]]
+                head_rect = box_data[0]
+                body_quad = box_data[1]
+
+                # 目标中心（用于 B-scope 方位）
+                cx = (head_rect[0] + head_rect[2]) // 2
+                cy = (head_rect[1] + head_rect[3]) // 2
+
+                # 深度：左右肩中点到鼻子（头框中心）的距离
+                # 越大表示目标离摄像头越近
+                shoulder_mid_x = (body_quad[0][0] + body_quad[1][0]) / 2
+                shoulder_mid_y = (body_quad[0][1] + body_quad[1][1]) / 2
+                nose_x = (head_rect[0] + head_rect[2]) / 2
+                nose_y = (head_rect[1] + head_rect[3]) / 2
+                depth = math.sqrt(
+                    (shoulder_mid_x - nose_x) ** 2 +
+                    (shoulder_mid_y - nose_y) ** 2
+                )
+
                 targets_json.append({
                     "id": int(tid_str),
-                    "bbox": box_data[0],
+                    "bbox": head_rect,
+                    "cx": cx,
+                    "cy": cy,
+                    "depth": round(depth, 1),
                 })
 
             # ---- 2e. 串口状态 ----
@@ -278,14 +304,17 @@ def main():
                 targets=targets_json,
                 serial_status=ser_status,
                 serial_msg=ser_msg,
+                camera_size=(cam_w, cam_h),
             )
 
-            # ---- 2g. 视角控制（鼠标位移 → 云台误差） ----
+            # ---- 2g. 视角控制（鼠标位移 → 云台角度） ----
             if current_mode == MODE_PLAYING:
                 v_x += dx * YAW
                 v_y += dy * PITCH
+                v_x = max(-90, min(90, v_x))
+                v_y = max(-90, min(90, v_y))
                 if serial and serial.connected:
-                    serial.send_errors(int(v_x), int(v_y))
+                    serial.send_angles(v_x, v_y)
 
             time.sleep(0.03)
 

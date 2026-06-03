@@ -2,8 +2,8 @@
 # 所有 UI 组件共享的颜色、尺寸、时间常量
 
 # ====== 窗口 ======
-SCREEN_WIDTH = 1280
-SCREEN_HEIGHT = 720
+SCREEN_WIDTH = 1920
+SCREEN_HEIGHT = 1080
 FPS_TARGET = 60
 
 # ====== 颜色 ======

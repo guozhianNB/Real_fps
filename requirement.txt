@@ -16,3 +16,5 @@ pyserial>=3.5          # 串口通信（A 串口模块使用）
 #图像处理
 opencv-python
 ultralytics
+PyOpenGL
+PyOpenGL_accelerate

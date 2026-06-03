@@ -100,13 +100,12 @@ class Effects:
         self.active_effects = []
 
     def add_hit_flash(self, zone="", delta=0):
-        """添加命中动画（闪白 + 得分弹出）。
+        """添加命中反馈（得分弹出，无闪白）。
 
         参数：
             zone:  "head" / "body" / ""
             delta: 得分值
         """
-        self.active_effects.append(HitFlash())
         if delta > 0:
             reason = "headshot" if zone == "head" else "hit"
             self.active_effects.append(ScorePopup(delta, reason))

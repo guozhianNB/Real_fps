@@ -6,6 +6,7 @@
 #   3. 显示摄像头背景、准星、目标框
 #   4. 通过 UDP 实时接收开火事件
 #   5. 调用雷达、HUD、动画组件
+#   6. 在右下角显示 3D 第一人称持枪视图（预渲染）
 #
 # 运行：
 #   from ui.core import UI
@@ -18,13 +19,12 @@ import queue
 import time
 import cv2
 import numpy as np
-from pathlib import Path
 
-# ====== 配置 ======
 from ui.config import *
 from ui.radar import Radar
 from ui.hud import HUD
 from ui.effects import Effects
+from ui.gun_view import GunView
 
 STATUS_FILE = "state.json"
 FIRE_EVENT = pygame.USEREVENT + 1   # UDP 开火事件的自定义编号
@@ -34,7 +34,7 @@ CAMERA_TIMEOUT = 1.0                # 摄像头 HTTP 请求超时
 class UI:
     """主 UI 类。调用 start() 后一直运行，直到窗口关闭。"""
 
-    def __init__(self, fullscreen=False):
+    def __init__(self, fullscreen=True):
         self.fullscreen = fullscreen
 
         # 数据容器（后台线程写，主循环读）
@@ -47,10 +47,16 @@ class UI:
         self.clock = pygame.time.Clock()
         self.prev_time = time.time()
 
-        # C 的组件
         self.radar = None
         self.hud = None
         self.effects = None
+        self.gun_surf = None
+        self.gun_frames = []
+        self.gun_muzzle_frames = []
+        self._gun_breath = 0.0
+        self._recoil_timer = 0.0
+        self._recoil_duration = 500.0
+        self._muzzle_timer = 0.0
 
         print("[UI] 初始化完成，准备起飞 🚀")
 
@@ -113,29 +119,70 @@ class UI:
     def start(self):
         pygame.init()
 
+        # --- ① 先获取目标分辨率 ---
+        info = pygame.display.Info()
+        self._ww = info.current_w if self.fullscreen else SCREEN_WIDTH
+        self._wh = info.current_h if self.fullscreen else SCREEN_HEIGHT
+
+        # --- ② 预渲染枪械动画序列（缓动归位） ---
+        self.gun_surf = None
+        self.gun_frames = []        # recoil 动画帧列表
+        self._gun_breath = 0.0
+        self._recoil_timer = 0.0
+        self._recoil_duration = 500.0
+        self._gun_w = int(self._wh * 0.65)   # 自适应：宽 = 65% 屏幕高
+        self._gun_h = self._gun_w
+        try:
+            _old = pygame.display.set_mode((self._gun_w, self._gun_h),
+                                           pygame.OPENGL | pygame.HIDDEN)
+            gv = GunView(self._gun_w, self._gun_h,
+                         model_path="ui/models/gun.obj",
+                         cam_dist=2.5, cam_pitch=-10, cam_yaw=5)
+
+            # 预渲染枪械动画帧 + 对应枪口火焰帧
+            NUM_FRAMES = 10
+            recoil_dist, recoil_pitch = 2.2, -6
+            normal_dist, normal_pitch = 2.5, -10
+            self.gun_surf = gv.render(0)
+            self.gun_muzzle_frames = []
+            for i in range(NUM_FRAMES):
+                t = i / (NUM_FRAMES - 1)
+                ease = 1 - (1 - t) ** 2
+                d = normal_dist + (recoil_dist - normal_dist) * (1 - ease)
+                p = normal_pitch + (recoil_pitch - normal_pitch) * (1 - ease)
+                gv.cam_dist = d
+                gv.cam_pitch = p
+                self.gun_frames.append(gv.render(0))
+                self.gun_muzzle_frames.append(gv.render(0, muzzle=True))
+
+            gv.cleanup()
+            pygame.display.quit()
+            pygame.display.init()
+            print(f"[枪械] 预渲染 {NUM_FRAMES} 帧动画, 尺寸 {self._gun_w}x{self._gun_h}")
+        except Exception as e:
+            print(f"[枪械] 预渲染失败: {e}")
+
+        # --- ③ 创建主显示（普通 Pygame） ---
         flags = pygame.FULLSCREEN if self.fullscreen else 0
-        self.screen = pygame.display.set_mode(
-            (SCREEN_WIDTH, SCREEN_HEIGHT), flags
-        )
+        self.screen = pygame.display.set_mode((self._ww, self._wh), flags)
         pygame.display.set_caption("Real FPS")
 
-        # 创建组件
-        self.radar = Radar(
-            SCREEN_WIDTH - RADAR_RADIUS - RADAR_MARGIN,
-            SCREEN_HEIGHT - RADAR_RADIUS - RADAR_MARGIN,
-        )
+        # 以实际生效的窗口尺寸为准
+        self._ww, self._wh = self.screen.get_size()
+        print(f"[UI] 实际分辨率: {self._ww}x{self._wh}")
+
+        from ui.radar import B_SCOPE_W, B_SCOPE_H
+        self.radar = Radar(self._ww - B_SCOPE_W - RADAR_MARGIN, RADAR_MARGIN)
         self.hud = HUD()
         self.effects = Effects()
 
-        # 启动后台线程
         self._start_json_reader()
         self._start_camera_reader()
         self._start_fire_listener()
 
-        print("[UI] 进入主循环")
+        print(f"[UI] 进入主循环 ({self._ww}x{self._wh})")
         self._main_loop()
 
-        # 清理
         self._stop.set()
         if hasattr(self, '_fire_listener'):
             self._fire_listener.stop()
@@ -148,128 +195,136 @@ class UI:
 
     def _main_loop(self):
         running = True
-
         while running:
-            # ---- 1. 处理 Pygame 事件 ----
-            for event in pygame.event.get():
-                if event.type == pygame.QUIT:
+            for e in pygame.event.get():
+                if e.type == pygame.QUIT:
                     running = False
-                elif event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
+                elif e.type == pygame.KEYDOWN and e.key == pygame.K_ESCAPE:
                     running = False
-                elif event.type == FIRE_EVENT:
-                    # 收到 UDP 开火事件！
+                elif e.type == FIRE_EVENT:
+                    self._recoil_timer = self._recoil_duration
+                    self._muzzle_timer = 80.0
                     if self.effects:
-                        hit_zone = event.__dict__.get("hit_zone", "")
-                        score_delta = event.__dict__.get("score_delta", 0)
-                        self.effects.add_hit_flash(hit_zone, score_delta)
+                        self.effects.add_hit_flash(
+                            e.__dict__.get("hit_zone", ""),
+                            e.__dict__.get("score_delta", 0))
 
-            # ---- 2. 处理后台线程发来的数据 ----
             try:
                 while True:
-                    typ, payload = self.event_q.get_nowait()
-                    if typ == "json":
-                        self.latest_state = json.loads(payload)
-                    elif typ == "camera":
-                        self.latest_frame = payload
+                    t, v = self.event_q.get_nowait()
+                    if t == "json" and v.strip():
+                        try:
+                            self.latest_state = json.loads(v)
+                        except json.JSONDecodeError:
+                            pass
+                    elif t == "camera":
+                        self.latest_frame = v
             except queue.Empty:
                 pass
 
-            # ---- 3. 更新时间 ----
             now = time.time()
             dt_ms = (now - self.prev_time) * 1000
             self.prev_time = now
-
-            # ---- 4. 更新动画 ----
             if self.effects:
                 self.effects.update(dt_ms)
-
-            # ---- 5. 绘制 ----
-            self._render()
-
-            # ---- 6. 刷新 ----
+            # 后坐力衰减
+            if self._recoil_timer > 0:
+                self._recoil_timer = max(0, self._recoil_timer - dt_ms)
+            if self._muzzle_timer > 0:
+                self._muzzle_timer = max(0, self._muzzle_timer - dt_ms)
+            self._render(dt_ms)
             pygame.display.flip()
             self.clock.tick(FPS_TARGET)
 
     # --------------------------------------------------
-    #  绘制
+    #  绘制（纯 Pygame 2D，直接绘制到 screen）
     # --------------------------------------------------
 
-    def _render(self):
-        state = self.latest_state
+    def _render(self, dt_ms=16):
+        s = self.screen
+        st = self.latest_state
 
-        # ---- 背景：摄像头画面或黑色 ----
+        # 背景
         if self.latest_frame is not None:
             surf = pygame.surfarray.make_surface(
-                self.latest_frame.swapaxes(0, 1)
-            )
-            surf = pygame.transform.scale(surf, (SCREEN_WIDTH, SCREEN_HEIGHT))
-            self.screen.blit(surf, (0, 0))
+                self.latest_frame.swapaxes(0, 1))
+            s.blit(pygame.transform.scale(surf, (self._ww, self._wh)), (0, 0))
         else:
-            self.screen.fill(COLOR_BLACK)
+            s.fill(COLOR_BLACK)
 
-        # ---- 目标框 ----
-        targets = state.get("targets", [])
-        for t in targets:
-            bbox = t.get("bbox")
-            if bbox and len(bbox) == 4:
-                x1, y1, x2, y2 = bbox
-                rect = pygame.Rect(x1, y1, x2 - x1, y2 - y1)
-                pygame.draw.rect(self.screen, COLOR_GREEN, rect, 2)
+        # 缩放
+        cs = st.get("camera_size")
+        sx = self._ww / cs[0] if cs and len(cs) == 2 and cs[0] > 0 else 1.0
+        sy = self._wh / cs[1] if cs and len(cs) == 2 and cs[1] > 0 else 1.0
 
-        # ---- 准星 ----
-        cx, cy = SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2
-        cs = CROSSHAIR_SIZE
-        # 外圈
-        pygame.draw.circle(self.screen, COLOR_GREEN, (cx, cy), 15, 2)
-        # 中心点
-        pygame.draw.circle(self.screen, COLOR_GREEN, (cx, cy), 2, 0)
-        # 十字线
-        pygame.draw.line(self.screen, COLOR_GREEN, (cx - cs - 5, cy), (cx - 18, cy), 2)
-        pygame.draw.line(self.screen, COLOR_GREEN, (cx + 18, cy), (cx + cs + 5, cy), 2)
-        pygame.draw.line(self.screen, COLOR_GREEN, (cx, cy - cs - 5), (cx, cy - 18), 2)
-        pygame.draw.line(self.screen, COLOR_GREEN, (cx, cy + 18), (cx, cy + cs + 5), 2)
+        # 目标框
+        for t in st.get("targets", []):
+            b = t.get("bbox")
+            if b and len(b) == 4:
+                r = pygame.Rect(int(b[0]*sx), int(b[1]*sy),
+                                int((b[2]-b[0])*sx), int((b[3]-b[1])*sy))
+                pygame.draw.rect(s, COLOR_GREEN, r, 2)
 
-        # ---- HUD 信息 ----
+        # 准星
+        cx, cy = self._ww // 2, self._wh // 2
+        c = CROSSHAIR_SIZE
+        pygame.draw.circle(s, COLOR_GREEN, (cx, cy), 15, 2)
+        pygame.draw.circle(s, COLOR_GREEN, (cx, cy), 2, 0)
+        for dx, dy in [(-c-5, 0), (18, 0), (0, -c-5), (0, 18)]:
+            pygame.draw.line(s, COLOR_GREEN, (cx+dx, cy+dy),
+                             (cx+dx+(20 if dx else 0), cy+dy+(20 if dy else 0)), 2)
+
+        # HUD
         try:
-            score = state.get("score", {}).get("value", 0)
-            mode = state.get("system_state", {}).get("mode", "idle")
-            serial = state.get("serial", {}).get("status", "N/A")
-
-            # 使用字体工具
             from ui.assets import get_font_large, get_font_small
-
-            font_large = get_font_large()
-            font_small = get_font_small()
-
-            score_text = font_large.render(f"SCORE: {score}", True, COLOR_WHITE)
-            self.screen.blit(score_text, (HUD_MARGIN, HUD_MARGIN))
-
-            fps_val = int(self.clock.get_fps())
-            fps_text = font_small.render(f"FPS: {fps_val}", True, COLOR_WHITE)
-            self.screen.blit(fps_text, (HUD_MARGIN, HUD_MARGIN + 50))
-
-            status_text = font_small.render(
-                f"MODE: {mode.upper()}  |  SERIAL: {serial}", True, COLOR_WHITE,
-            )
-            status_rect = status_text.get_rect(
-                center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT - 30),
-            )
-            self.screen.blit(status_text, status_rect)
-
+            fl, fs = get_font_large(), get_font_small()
+            s.blit(fl.render(f"SCORE: {st.get('score',{}).get('value',0)}",
+                             True, COLOR_WHITE), (HUD_MARGIN, HUD_MARGIN))
+            s.blit(fs.render(f"FPS: {int(self.clock.get_fps())}",
+                             True, COLOR_WHITE), (HUD_MARGIN, HUD_MARGIN+50))
+            txt = f"MODE: {st.get('system_state',{}).get('mode','idle').upper()}  |  " \
+                  f"SERIAL: {st.get('serial',{}).get('status','N/A')}"
+            s.blit(fs.render(txt, True, COLOR_WHITE),
+                   fs.render(txt, True, COLOR_WHITE).get_rect(
+                       center=(self._ww//2, self._wh-30)))
         except Exception:
             pass
 
-        # ---- 调用组件 ----
+        # 组件
+        targets = st.get("targets", [])
         if self.radar:
-            self.radar.render(self.screen, targets, dt_ms=16)
+            self.radar.render(s, targets, 16)
         if self.hud:
-            self.hud.render(self.screen, state, int(self.clock.get_fps()), 16)
+            self.hud.render(s, st, int(self.clock.get_fps()), 16)
         if self.effects:
-            self.effects.render(self.screen)
+            self.effects.render(s)
+
+        # 枪械（右下角贴边，后坐力逐帧动画）
+        if self.gun_surf is not None:
+            self._gun_breath += dt_ms
+            off = np.sin(self._gun_breath * 0.0025) * 3
+            gx = self._ww - self._gun_w
+            gy = self._wh - self._gun_h + off
+            if self._recoil_timer > 0 and self.gun_frames:
+                t = self._recoil_timer / self._recoil_duration
+                idx = int((1 - t) * (len(self.gun_frames) - 1))
+                idx = max(0, min(len(self.gun_frames) - 1, idx))
+                s.blit(self.gun_frames[idx], (gx, gy))
+                # 枪口火焰帧（3D 渲染，添加混合）
+                if (self._muzzle_timer > 0 and self.gun_muzzle_frames
+                        and idx < len(self.gun_muzzle_frames)):
+                    m_alpha = int((self._muzzle_timer / 80.0) * 200)
+                    self.gun_muzzle_frames[idx].set_alpha(max(0, min(200, m_alpha)))
+                    s.blit(self.gun_muzzle_frames[idx], (gx, gy),
+                           special_flags=pygame.BLEND_ADD)
+                    self.gun_muzzle_frames[idx].set_alpha(255)
+            else:
+                s.blit(self.gun_surf, (gx, gy))
 
 
 # ====== 测试入口 ======
 if __name__ == "__main__":
     print("=== Real FPS UI ===")
     print("按 ESC 退出")
-    UI(fullscreen=False).start()
+    # fullscreen=True 全屏，False 窗口
+    UI(fullscreen=True).start()

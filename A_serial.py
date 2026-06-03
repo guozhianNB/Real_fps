@@ -7,21 +7,21 @@ A_serial.py — 串口通信模块
 
 职责：
   1. 打开/关闭串口
-  2. 发送云台舵机误差值 "error_x,error_y\\n" 给单片机
-  3. 单片机的 PID 控制器根据误差值自动调整云台角度
+  2. 发送云台舵机目标角度 "yaw,pitch\\n" 给单片机
+  3. 单片机根据目标角度直接控制舵机
   4. 断线重连 / 超时处理
   5. 向 state.json 写入串口状态
 
 串口协议：
-  发送: "error_x,error_y\\n"
-        error_x = 水平误差 (正=右, 负=左)
-        error_y = 俯仰误差 (正=下, 负=上)
+  发送: "yaw,pitch\\n"
+        yaw   = 水平角度 (-90 ~ 90)，正=右，负=左
+        pitch = 俯仰角度 (-90 ~ 90)，正=下，负=上
         末尾必须加换行符 \\n
 
-  例如视觉跟踪时：
-    - 目标在屏幕右侧 → 发送 "50,0\\n"
-    - 目标在屏幕上方 → 发送 "0,-30\\n"
-    - 目标在准星上  → 发送 "0,0\\n"
+  例如云台控制：
+    - 向右转 30°    → 发送 "30,0\\n"
+    - 向上转 45°    → 发送 "0,-45\\n"
+    - 回正          → 发送 "0,0\\n"
 
 依赖：
   pip install pyserial
@@ -34,7 +34,7 @@ import time
 
 
 class SerialController:
-    """串口控制器，发送误差值给单片机 PID 云台。"""
+    """串口控制器，发送目标角度给单片机舵机云台。"""
 
     def __init__(self, port=None, baudrate=115200, timeout=0.05):
         """
@@ -105,19 +105,17 @@ class SerialController:
             self.last_msg = str(e)
             print(f"[Serial] 重连失败: {e}")
 
-    def send_errors(self, error_x, error_y):
-        """发送误差值给单片机。
-
-        单片机内置 PID 控制器根据误差自动调整舵机角度。
+    def send_angles(self, yaw, pitch):
+        """发送舵机目标角度给单片机。
 
         参数：
-            error_x: 水平误差（像素/角度差），正=右，负=左
-            error_y: 俯仰误差（像素/角度差），正=下，负=上
+            yaw:   水平角度 (-90 ~ 90)，正=右，负=左
+            pitch: 俯仰角度 (-90 ~ 90)，正=下，负=上
         """
-        # 限幅到 ±2000 以保证格式紧凑
-        ex = max(-2000, min(2000, int(round(error_x))))
-        ey = max(-2000, min(2000, int(round(error_y))))
-        cmd = f"{ex},{ey}\n"
+        # 限幅到 ±90°
+        yaw = max(-90, min(90, int(round(yaw))))
+        pitch = max(-90, min(90, int(round(pitch))))
+        cmd = f"{yaw},{pitch}\n"
         self._write(cmd)
 
     def send_raw(self, raw_string):
@@ -191,9 +189,9 @@ class SerialController:
 def example_usage():
     """
     典型使用流程：
-        1. 从视觉模块获取目标偏移 dx, dy（像素）
-        2. 通过串口把偏移作为误差发送给单片机
-        3. 单片机 PID 控制云台跟踪目标
+        1. 从视觉模块计算目标角度 yaw, pitch
+        2. 通过串口把目标角度发送给单片机
+        3. 单片机直接控制舵机转到目标角度
 
     注意：SerialController() 初始化时已自动打开串口，无需手动调用 open()。
     """
@@ -203,10 +201,10 @@ def example_usage():
         print(e)
         return
 
-    # 模拟视觉检测到的目标偏移
-    dx, dy = 120, -45
-    ser.send_errors(dx, dy)
-    print(f"发送误差: ({dx}, {dy})")
+    # 模拟目标角度
+    yaw, pitch = 30, -45
+    ser.send_angles(yaw, pitch)
+    print(f"发送角度: yaw={yaw}, pitch={pitch}")
     ser.close()
 
 

@@ -17,12 +17,35 @@ from fastapi import FastAPI, HTTPException, Response
 # 1. 全局单例：摄像头管理器
 # --------------------------
 class CameraManager:
-    def __init__(self, camera_id=0):
+    def __init__(self, camera_id=0, width=1920, height=1080):
         self.cap = cv2.VideoCapture(camera_id)
         self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
 
         if not self.cap.isOpened():
             raise RuntimeError("无法打开摄像头！请检查设备是否被其他程序占用。")
+
+        # 自动寻找摄像头能支持的最高分辨率
+        candidates = [(3840, 2160), (2560, 1440), (1920, 1080),
+                      (1280, 720), (640, 480)]
+        best_w, best_h = 640, 480
+        for cw, ch in candidates:
+            self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, cw)
+            self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, ch)
+            rw = int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+            rh = int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+            if (rw, rh) == (cw, ch):
+                best_w, best_h = cw, ch
+                break
+            # 也保存扫到的最优值
+            if rw * rh > best_w * best_h:
+                best_w, best_h = rw, rh
+
+        # 重新设为最佳分辨率
+        self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, best_w)
+        self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, best_h)
+        actual_w = int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        actual_h = int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        print(f"摄像头分辨率: 最佳 {best_w}x{best_h} → 实际 {actual_w}x{actual_h}")
 
         self.frame_queue = []
         self.lock = threading.Lock()
@@ -106,7 +129,7 @@ def get_camera_size():
     return {"width": width, "height": height}
 
 
-def _encode_frame(frame, quality=85):       #将帧编码为 JPEG 格式的字节流
+def _encode_frame(frame, quality=95):       #将帧编码为 JPEG 格式的字节流
     success, buffer = cv2.imencode(
         ".jpg",
         frame,
@@ -128,6 +151,7 @@ async def get_camera_snapshot():
     jpeg_bytes = _encode_frame(frame)
     return Response(content=jpeg_bytes, media_type="image/jpeg")
 '''
+启动 uvicorn vision.camera_share:app --port 8010 --reload
 如何获得当前摄像头画面：
    - 直接访问接口获取 JPEG 图片：
    - 通过 HTTP GET 请求访问 http://127.0.0.1:8010/snapshot

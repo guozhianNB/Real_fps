@@ -1,1 +1,32 @@
-{"system_state": {"mode": "playing", "msg": "\u547d\u4e2d\uff01"}, "score": {"value": 50}, "targets": [{"id": 1, "bbox": [600, 320, 680, 400]}], "serial": {"status": "OK"}, "timestamp": 1780475370.5702393}
+{
+  "timestamp": 1780505206.8177524,
+  "system_state": {
+    "mode": "playing",
+    "msg": "normal"
+  },
+  "score": {
+    "value": 0
+  },
+  "targets": [
+    {
+      "id": 1,
+      "bbox": [
+        484,
+        288,
+        680,
+        675
+      ],
+      "cx": 582,
+      "cy": 481,
+      "depth": 225.9
+    }
+  ],
+  "camera_size": [
+    1280,
+    720
+  ],
+  "serial": {
+    "status": "ERROR",
+    "msg": "not initialized"
+  }
+}

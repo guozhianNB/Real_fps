@@ -111,9 +111,10 @@ def main():
     listener.start()
 
     # 组件
+    from ui.radar import B_SCOPE_W, B_SCOPE_H
     radar = Radar(
-        SCREEN_WIDTH - RADAR_RADIUS - RADAR_MARGIN,
-        SCREEN_HEIGHT - RADAR_RADIUS - RADAR_MARGIN,
+        SCREEN_WIDTH - B_SCOPE_W - RADAR_MARGIN,
+        RADAR_MARGIN,
     )
     hud = HUD()
     effects = Effects()
