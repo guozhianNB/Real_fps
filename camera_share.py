@@ -127,3 +127,20 @@ async def get_camera_snapshot():
 
     jpeg_bytes = _encode_frame(frame)
     return Response(content=jpeg_bytes, media_type="image/jpeg")
+'''
+如何获得当前摄像头画面：
+   - 直接访问接口获取 JPEG 图片：
+   - 通过 HTTP GET 请求访问 http://127.0.0.1:8010/snapshot
+   - 代码示例（Python）：
+
+
+import requests
+
+resp = requests.get("http://127.0.0.1:8010/snapshot")
+jpeg_bytes = resp.content   # ← 同样的 JPEG 二进制数据
+
+# 字节 → numpy 数组 → cv2 图像
+data = np.frombuffer(jpeg_bytes, dtype=np.uint8)
+frame = cv2.imdecode(data, cv2.IMREAD_COLOR)   # ← 这就是 cv2 的 BGR 图像了
+
+   '''
