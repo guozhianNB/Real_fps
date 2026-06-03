@@ -120,7 +120,12 @@ class HumanTracker:
     def get_latest(self):
         """线程安全地获取最新帧和跟踪结果。"""
         with self.lock:
-            return self.latest_frame, self.latest_result, dict(self.trajectories) #分别返回最新帧、跟踪结果和轨迹字典
+            return self.latest_frame, self.latest_result, dict(self.trajectories)
+
+    def get_analysis(self, aim_point):
+        """获取最新帧的分析结果（JSON 格式字典）。"""
+        frame, result, _ = self.get_latest()
+        return process_frame(frame, result, aim_point)
 
     def release(self):
         """停止后台线程并释放资源。"""
@@ -163,137 +168,118 @@ def get_camera_size():
         return None, None
 
 
+def process_frame(frame, result, aim_point):
+    """
+    分析一帧 YOLO 检测结果，返回 JSON 格式字典。
+
+    返回格式:
+    {
+        "num": 人数,
+        "box": {
+            id: [[head_x1, head_y1, head_x2, head_y2],        # 头部框
+                 [[x1,y1],[x2,y2],[x3,y3],[x4,y4]]]           # 身体四边形
+        },
+        "aim": {
+            "head": [命中头部的 id 列表],
+            "body": [命中身体的 id 列表]
+        }
+    }
+    """
+    data = {"num": 0, "box": {}, "aim": {"head": [], "body": []}}
+
+    if frame is None or result is None or not result.boxes:
+        return data
+
+    kp = result.keypoints.xy.cpu().numpy()
+    box_ids = getattr(result.boxes, "id", None)
+
+    head_hit_ids = []
+    body_hit_ids = []
+
+    for i, box in enumerate(kp):
+        try:
+            # 提取 17 个关键点
+            points = []
+            for p in range(17):
+                x, y = int(box[p][0]), int(box[p][1])
+                points.append((x, y))
+
+            tid = int(box_ids[i]) if box_ids is not None else -1
+
+            # --- 头部框 ---
+            w = abs(points[LEFT_EAR][0] - points[RIGHT_EAR][0])
+            h = abs((2 * points[NOSE][1] - points[LEFT_EYE][1] - points[RIGHT_EYE][1])) * 2
+            if w > 0 and h > 0:
+                head_x1 = int(min(points[LEFT_EAR][0], points[RIGHT_EAR][0]) + w * 0.1)
+                head_y1 = int(points[NOSE][1] - h * 1.0)
+                head_x2 = int(max(points[LEFT_EAR][0], points[RIGHT_EAR][0]) - w * 0.1)
+                head_y2 = int(points[NOSE][1] + h * 0.7)
+                head_rect = [head_x1, head_y1, head_x2, head_y2]
+            else:
+                head_rect = [0, 0, 0, 0]
+
+            # --- 身体四边形 ---
+            body_quad = [
+                [points[LEFT_SHOULDER][0], points[LEFT_SHOULDER][1]],
+                [points[RIGHT_SHOULDER][0], points[RIGHT_SHOULDER][1]],
+                [points[RIGHT_HIP][0], points[RIGHT_HIP][1]],
+                [points[LEFT_HIP][0], points[LEFT_HIP][1]],
+            ]
+
+            # 存入 box
+            data["box"][str(tid)] = [head_rect, body_quad]
+
+            # --- 击中判定 ---
+            if head_rect != [0, 0, 0, 0]:
+                head_quad = [
+                    (head_x1, head_y1), (head_x2, head_y1),
+                    (head_x2, head_y2), (head_x1, head_y2)
+                ]
+                if body_aim(aim_point, head_quad):
+                    head_hit_ids.append(tid)
+
+            if body_aim(aim_point, body_quad):
+                body_hit_ids.append(tid)
+
+        except Exception:
+            continue
+
+    data["num"] = len(data["box"])
+    data["aim"]["head"] = head_hit_ids
+    data["aim"]["body"] = body_hit_ids
+    return data
+
+
 def main():
-    # 检查模型文件是否存在
+    """独立测试入口：启动跟踪器并持续输出分析结果。"""
     if not Path(MODEL_PATH).exists():
         print(f"[错误] 模型文件未找到: {MODEL_PATH}")
-        print("请将 yolo26n-pose.pt 放在 model/ 目录下")
-        input("按 Enter 退出...")
         return
 
-    # 读取摄像头画面尺寸
     cam_w, cam_h = get_camera_size()
-    if cam_w and cam_h:
-        print(f"摄像头画面尺寸: {cam_w} x {cam_h}")
-    else:
-        print("[警告] 无法获取摄像头尺寸，将使用默认窗口大小")
+    if not cam_w or not cam_h:
+        print("[警告] 无法获取摄像头尺寸，使用默认 640x480")
+        cam_w, cam_h = 640, 480
 
-    aim_point = (cam_w // 2, cam_h // 2)                        # 准心位置，以画面中心为目标点
+    aim_point = (cam_w // 2, cam_h // 2)
+    print(f"摄像头尺寸: {cam_w}x{cam_h}, 准心: {aim_point}")
 
-    print("正在启动 YOLO 人体跟踪器...")
-    
-    tracker = HumanTracker(camera_url=CAMERA_PATH, model_path=MODEL_PATH)
-
-    cv2.namedWindow("RealFPS - YOLO Track", cv2.WINDOW_NORMAL)
-    cv2.resizeWindow("RealFPS - YOLO Track", cam_w , cam_h )
-
-    print("跟踪中... 按 'q' 或 ESC 退出")
+    tracker = HumanTracker(CAMERA_PATH, MODEL_PATH)
+    print("分析中... Ctrl+C 退出")
 
     try:
         while True:
-            frame, result, trajectories = tracker.get_latest()
-            if frame is None:
-                time.sleep(0.05)
-                continue
-
-            # 在帧上绘制跟踪方框
-            if result and result.boxes:
-                # 关键点坐标
-                kp = result.keypoints.xy.cpu().numpy()  
-
-                # 获取跟踪 ID 列表（第一帧可能为 None）
-                box_ids = getattr(result.boxes, "id", None)
-
-                '''person = [
-                    [id,
-                        [head_x1, head_y1, head_x2, head_y2],  # 头部框
-                        [(x,y),(x,y),(x,y),(x,y)]   # 身体框
-                    ],...
-                ]
-                '''
-                person=[]
-                for i, box in enumerate(kp):
-                    try:
-                        points = []
-                        for p in range(0, 17):
-                            x, y = int(box[p][0]), int(box[p][1])
-                            points.append((x, y))
-                            cv2.circle(frame, (x, y), 3, (0, 255, 255), -1)
-
-                        # 处理头部框
-                        w = abs(points[LEFT_EAR][0] - points[RIGHT_EAR][0])
-                        h = abs((2 * points[NOSE][1] - points[LEFT_EYE][1] - points[RIGHT_EYE][1])) * 2
-                        if w > 0 and h > 0:
-                            # OpenCV: y 向下增大，所以 head_y2（下巴）> head_y1（头顶）
-                            head_x1 = int(min(points[LEFT_EAR][0], points[RIGHT_EAR][0]) + w * 0.1)
-                            head_y1 = int(points[NOSE][1] - h * 1.0)   # 头顶（y 更小）
-                            head_x2 = int(max(points[LEFT_EAR][0], points[RIGHT_EAR][0]) - w * 0.1)
-                            head_y2 = int(points[NOSE][1] + h * 0.7)   # 下巴（y 更大）
-                        else:
-                            head_x1, head_y1, head_x2, head_y2 = 0, 0, 0, 0
-                        cv2.rectangle(frame, (head_x1, head_y1), (head_x2, head_y2), (0, 255, 255), 2)
-                        if body_aim(aim_point, [(head_x1, head_y1), (head_x2, head_y1), (head_x2, head_y2), (head_x1, head_y2)]):
-                            cv2.putText(frame, "AIM!", (head_x1, head_y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 0, 255), 2)
-                            print("准心击中头部！")
-                        # print(head_x1, head_y1, head_x2, head_y2,w,h)
-                        # 安全获取 ID
-                        tid = int(box_ids[i]) if box_ids is not None else -1
-
-                        # 处理身体框
-                        if body_aim(aim_point, [points[LEFT_SHOULDER], points[RIGHT_SHOULDER], points[RIGHT_HIP], points[LEFT_HIP]]):
-                            cv2.putText(frame, "AIM!", (points[LEFT_SHOULDER][0], points[LEFT_SHOULDER][1] - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 0, 255), 2)
-                            print("准心击中身体！")
-                        person.append([tid, [head_x1, head_y1, head_x2, head_y2], [points[LEFT_SHOULDER], points[RIGHT_SHOULDER], points[LEFT_HIP], points[RIGHT_HIP]]])
-                    except Exception:
-                        # 单个人体绘制出错不影响后续
-                        continue
-                        
-
-
-
-            cv2.imshow("RealFPS - YOLO Track", frame)
-            key = cv2.waitKey(1) & 0xFF
-            if key in (ord("q"), 27):  # q 或 ESC
-                break
-
+            data = tracker.get_analysis(aim_point)
+            if data["num"] > 0:
+                print(json.dumps(data, ensure_ascii=False))
+            time.sleep(0.05)
+    except KeyboardInterrupt:
+        pass
     finally:
         tracker.release()
-        cv2.destroyAllWindows()
-        print("程序已退出。")
+        print("\n已退出。")
 
 
 if __name__ == "__main__":
     main()
-
-
-
-
-
-
-# # 辅助函数：判断点是否在四边形内（用于判断目标点是否在框内）
-# def body_aim(point, quad_points):
-#     """
-#     判断目标点是否在四个点组成的任意四边形内
-#     point: 目标点坐标 (px, py)
-#     quad_points: 四个点的列表 [(x1,y1), (x2,y2), (x3,y3), (x4,y4)]
-#     """
-#     px, py = point
-#     inside = False
-    
-#     # 射线法核心逻辑
-#     p1x, p1y = quad_points[0]
-#     for i in range(1, len(quad_points) + 1):
-#         p2x, p2y = quad_points[i % len(quad_points)] # 遍历每一条边
-        
-#         # 判断射线是否穿过当前边
-#         if py > min(p1y, p2y):
-#             if py <= max(p1y, p2y):
-#                 if px <= max(p1x, p2x):
-#                     if p1y != p2y:
-#                         xinters = (py - p1y) * (p2x - p1x) / (p2y - p1y) + p1x
-#                     if p1x == p2x or px <= xinters:
-#                         inside = not inside
-#         p1x, p1y = p2x, p2y
-        
-#     return inside
 
