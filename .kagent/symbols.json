@@ -38,21 +38,21 @@
     },
     "main.py": {
       "ipo_ts": 1780409237601,
-      "edit_count": 98,
-      "last_lines": 482,
-      "last_ts": 1780538058784,
+      "edit_count": 114,
+      "last_lines": 597,
+      "last_ts": 1780550741193,
       "delisted": false,
       "last_source": "onSave",
-      "last_content_hash": "1c4dc235"
+      "last_content_hash": "6d58801c"
     },
     "start.py": {
       "ipo_ts": 1780409882174,
-      "edit_count": 21,
-      "last_lines": 85,
-      "last_ts": 1780520507645,
+      "edit_count": 22,
+      "last_lines": 108,
+      "last_ts": 1780540593379,
       "delisted": false,
       "last_source": "onSave",
-      "last_content_hash": "7415fef8"
+      "last_content_hash": "d1c79659"
     },
     "教学参考文档/B_pygame.md": {
       "ipo_ts": 1780463770834,
@@ -101,12 +101,12 @@
     },
     "mouse.py": {
       "ipo_ts": 1780470494038,
-      "edit_count": 15,
-      "last_lines": 316,
-      "last_ts": 1780511233689,
+      "edit_count": 16,
+      "last_lines": 320,
+      "last_ts": 1780542747099,
       "delisted": false,
       "last_source": "onSave",
-      "last_content_hash": "be0ce823"
+      "last_content_hash": "2b3daf4a"
     },
     "ui/__init__.py": {
       "ipo_ts": 1780474978332,
@@ -128,21 +128,21 @@
     },
     "ui/assets.py": {
       "ipo_ts": 1780474978426,
-      "edit_count": 3,
-      "last_lines": 49,
-      "last_ts": 1780519031022,
+      "edit_count": 4,
+      "last_lines": 53,
+      "last_ts": 1780546068409,
       "delisted": false,
       "last_source": "onSave",
-      "last_content_hash": "f4c226d0"
+      "last_content_hash": "25e17eac"
     },
     "ui/radar.py": {
       "ipo_ts": 1780474999733,
-      "edit_count": 5,
-      "last_lines": 146,
-      "last_ts": 1780491114449,
+      "edit_count": 7,
+      "last_lines": 153,
+      "last_ts": 1780542885143,
       "delisted": false,
       "last_source": "onSave",
-      "last_content_hash": "6fee44e"
+      "last_content_hash": "f2de1cd2"
     },
     "ui/hud.py": {
       "ipo_ts": 1780474999850,
@@ -164,12 +164,12 @@
     },
     "ui/core.py": {
       "ipo_ts": 1780475023439,
-      "edit_count": 128,
-      "last_lines": 474,
-      "last_ts": 1780521733960,
+      "edit_count": 131,
+      "last_lines": 493,
+      "last_ts": 1780546061236,
       "delisted": false,
       "last_source": "onSave",
-      "last_content_hash": "e18f39ae"
+      "last_content_hash": "e6bf0faf"
     },
     "ui/demo_reader.py": {
       "ipo_ts": 1780475023497,
@@ -440,6 +440,42 @@
       "delisted": false,
       "last_source": "onSave",
       "last_content_hash": "1206cf06"
+    },
+    "autoaim.py": {
+      "ipo_ts": 1780545464296,
+      "edit_count": 2,
+      "last_lines": 98,
+      "last_ts": 1780545464368,
+      "delisted": false,
+      "last_source": "onSave",
+      "last_content_hash": "7d2835d8"
+    },
+    "music/bgm.py": {
+      "ipo_ts": 1780546809467,
+      "edit_count": 2,
+      "last_lines": 151,
+      "last_ts": 1780546812761,
+      "delisted": false,
+      "last_source": "onSave",
+      "last_content_hash": "495a6a20"
+    },
+    "music/bgm/bgm_duck.mp3": {
+      "ipo_ts": 1780546811598,
+      "edit_count": 2,
+      "last_lines": 9803,
+      "last_ts": 1780546899662,
+      "delisted": false,
+      "last_source": "onSave",
+      "last_content_hash": "93a29693"
+    },
+    "music/bgm/黄勇,任浩铭 - 你看到的我 (DJ版)_音频.mp3": {
+      "ipo_ts": 1780550952151,
+      "edit_count": 1,
+      "last_lines": 33269,
+      "last_ts": 1780550952151,
+      "delisted": false,
+      "last_source": "onSave",
+      "last_content_hash": "f7287c1f"
     }
   }
 }

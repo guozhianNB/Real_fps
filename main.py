@@ -54,10 +54,13 @@ from pathlib import Path
 import numpy as np
 import cv2
 import pyee
+from sympy import true
 from vision.vision import HumanTracker, get_camera_size
 from fire_notifier import send_fire, send_kill, close_sender, ReloadDoneListener, close_reload_sender
 from A_serial import SerialController
 from mouse import MouseListener
+from autoaim import AutoAimPID
+from music.bgm import BGMPlayer
 
 # ====== 人脸识别初始化 ======
 try:
@@ -125,7 +128,8 @@ RIGHT_ANKLE = 16
 
 def write_state(system_state, score_value=0,
                 targets=None, serial_status="OK", serial_msg="connected",
-                camera_size=None, ammo=0):
+                camera_size=None, ammo=0, show_boxes=True,
+                target_lost_at=0.0):
     """写入 state.json。开火事件已独立到 UDP，不在此传递。"""
     state = {
         "timestamp": time.time(),
@@ -135,6 +139,8 @@ def write_state(system_state, score_value=0,
         "camera_size": camera_size or [0, 0],
         "serial": {"status": serial_status, "msg": serial_msg},
         "ammo": ammo,
+        "show_boxes": show_boxes,
+        "target_lost_at": target_lost_at,
     }
     try:
         with open(STATE_FILE, "w", encoding="utf-8") as f:
@@ -181,8 +187,40 @@ def init_serial(port, baudrate):
 
 def main():
     """游戏主程序入口：后端计算。"""
+    #===================== 常量 =====================
+    BOX = False  # 是否显示目标框
+    LOCK = False # 能否雷达锁定敌方
+    AUTO_FIRE = False  # 是否自动开火（不需要鼠标点击）
+    INFINITE_AMMO = False  # 无限弹药（不需要换弹）
+    FIRE_HINT = False  # 是否显示开火提示（UI）
 
-    # ===================== 1. 初始化 =====================
+   
+
+
+    # ===================== 1. 初始化 ===================== 
+    #确定游戏模式
+    GMode = "A"  # 默认方案 A，支持命令行参数指定方案：python main.py B
+    if len(sys.argv) > 1 and sys.argv[1] in ("A", "B", "C"):
+        GMode = sys.argv[1]
+    if GMode == "A":
+        BOX = False
+        LOCK = False
+        AUTO_FIRE = False
+        INFINITE_AMMO = False
+        FIRE_HINT = False
+    elif GMode == "B":
+        BOX = True
+        LOCK = True
+        AUTO_FIRE = False
+        INFINITE_AMMO = False
+        FIRE_HINT = True
+    elif GMode == "C":
+        BOX = True
+        LOCK = True
+        AUTO_FIRE = True
+        INFINITE_AMMO = True
+        FIRE_HINT = True
+
 
     # 1a. 等待摄像头服务就绪
     cam_w, cam_h = wait_for_camera()
@@ -196,6 +234,7 @@ def main():
     serial = init_serial(SERIAL_PORT, SERIAL_BAUDRATE)
     v_x = 0  # 云台 yaw 角目标 (-90~90)
     v_y = 0  # 云台 pitch 角目标 (-90~90)
+    autoaim = AutoAimPID()  # PID 自瞄控制器
 
     # 1d. 鼠标监听器（后台线程自动启动，start() 后开始采集）
     ml = MouseListener(
@@ -205,9 +244,20 @@ def main():
     game_running = True
     current_mode = MODE_PLAYING
     reloading = False
-    ammo = 30
+    if INFINITE_AMMO:
+        ammo = 114514
+    else:
+        ammo = 30
+    # 1e. 背景音乐
+    bgm = BGMPlayer()
+    if GMode == "A":
+        bgm.load("bgm_a.mp3")
+    elif GMode == "B":
+        bgm.load("bgm_b.mp3")
+    elif GMode == "C":
+        bgm.load("bgm_c.mp3")
 
-    # 1e. 游戏状态机 —— 统一管理状态转换
+    # 1f. 游戏状态机 —— 统一管理状态转换
     emitter = pyee.EventEmitter()
 
     @emitter.on("GAME_START")
@@ -253,6 +303,40 @@ def main():
             print("[换弹] 开始换弹...")
             send_fire(event_type="reload_start")
     ml.emitter.on("GAME_RELOAD", on_reload)
+
+    # 锁定模式
+    locked_id = None
+    target_lost_at = 0.0  # 目标丢失时间戳（用于 UI 显示 TARGET LOST）
+
+    def on_lock():
+        nonlocal locked_id
+        if not LOCK:
+            return
+        if locked_id is not None:
+            locked_id = None
+            autoaim.reset()
+            print("[锁定] 解除锁定")
+            return
+        # 找离准心最近的目标
+        if data["num"] > 0:
+            best_dist = float("inf")
+            best_id = None
+            for tid_str, box_data in data["box"].items():
+                tid = int(tid_str)
+                if tid in blacklist:
+                    continue
+                head = box_data[0]
+                cx = (head[0] + head[2]) / 2
+                cy = (head[1] + head[3]) / 2
+                d = (cx - aim_point[0])**2 + (cy - aim_point[1])**2
+                if d < best_dist:
+                    best_dist = d
+                    best_id = tid
+            if best_id is not None:
+                locked_id = best_id
+                autoaim.reset()
+                print(f"[锁定] 目标 #{best_id}")
+    ml.emitter.on("GAME_LOCK", on_lock)
 
     # 监听 UI 换弹完成信号
     def on_reload_done(event):
@@ -336,6 +420,7 @@ def main():
                 print(f"[人脸] ID#{tid} → Unknown（30 帧未识别，最高置信度 {conf:.1f}）")
 
     try:
+        bgm.play(loops=-1, fade_ms=2000) # 无限循环 + 2秒淡入
         while game_running:
             now_ms = time.time() * 1000
 
@@ -366,7 +451,8 @@ def main():
 
             # ---- 2c. 开火检测 ----
             on_target = data["num"] > 0 and (len(alive_head) > 0 or len(alive_body) > 0)
-            if not reloading and ammo and left_pressed and (now_ms - last_hit_time) >= FIRE_COOLDOWN_MS:
+            fire_trigger = left_pressed or (AUTO_FIRE and on_target)
+            if not reloading and (ammo or INFINITE_AMMO) and fire_trigger and (now_ms - last_hit_time) >= FIRE_COOLDOWN_MS:
                 last_hit_time = now_ms
                 v_y += 10
                 ammo -= 1
@@ -382,6 +468,10 @@ def main():
 
                     score_value += score_delta
                     blacklist.add(killed_id)
+                    if killed_id == locked_id:
+                        locked_id = None
+                        autoaim.reset()
+                        print("[锁定] 目标已击杀，解除锁定")
                     name = face_registry.get(killed_id, f"#{killed_id}")
                     print(f"[击杀] {name} {hit_zone} +{score_delta}")
 
@@ -415,6 +505,7 @@ def main():
                     "cy": cy,
                     "depth": round(depth, 1),
                     "dead": tid in blacklist,
+                    "locked": tid == locked_id,
                 })
 
             # ---- 2e. 串口状态 ----
@@ -437,12 +528,36 @@ def main():
                 serial_msg=ser_msg,
                 camera_size=(cam_w, cam_h),
                 ammo=ammo,
+                show_boxes=BOX,
+                target_lost_at=target_lost_at,
             )
 
-            # ---- 2g. 视角控制（鼠标位移 → 云台角度） ----
+            # ---- 2g. 视角控制（锁定=PID自瞄，否则鼠标控制） ----
             if current_mode == MODE_PLAYING:
-                v_x += dx * YAW
-                v_y += dy * PITCH
+                if LOCK and locked_id is not None:
+                    # PID 自动瞄准锁定目标
+                    locked_target = None
+                    for t in targets_json:
+                        if t["id"] == locked_id and not t["dead"]:
+                            locked_target = t
+                            break
+                    if locked_target is not None:
+                        dx_a, dy_a = autoaim.compute(
+                            locked_target["cx"], locked_target["cy"],
+                            aim_point[0], aim_point[1],
+                        )
+                        v_x += dx_a
+                        v_y += dy_a
+                    else:
+                        # 目标丢失（出视野/遮挡）→ 解除锁定 + TARGET LOST
+                        if locked_id is not None:
+                            target_lost_at = time.time()
+                            locked_id = None
+                            autoaim.reset()
+                            print("[锁定] 目标丢失，解除锁定")
+                else:
+                    v_x += dx * YAW
+                    v_y += dy * PITCH
                 v_x = max(-90, min(90, v_x))
                 v_y = max(-90, min(90, v_y))
                 if serial and serial.connected:

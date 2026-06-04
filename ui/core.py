@@ -371,9 +371,9 @@ class UI:
                 pygame.draw.line(over, (255, 50, 50, 100), (0, 0), (w, h), 3)
                 pygame.draw.line(over, (255, 50, 50, 100), (w, 0), (0, h), 3)
                 s.blit(over, (x1, y1))
-            else:
-                # 存活：绿色框
-                pygame.draw.rect(s, COLOR_GREEN, (x1, y1, x2 - x1, y2 - y1), 2)
+            elif st.get("show_boxes", True):
+                color = COLOR_RED if t.get("locked") else COLOR_GREEN
+                pygame.draw.rect(s, color, (x1, y1, x2 - x1, y2 - y1), 2)
 
         # 准星
         cx, cy = self._ww // 2, self._wh // 2
@@ -383,6 +383,25 @@ class UI:
         for dx, dy in [(-c-5, 0), (18, 0), (0, -c-5), (0, 18)]:
             pygame.draw.line(s, COLOR_GREEN, (cx+dx, cy+dy),
                              (cx+dx+(20 if dx else 0), cy+dy+(20 if dy else 0)), 2)
+
+        # ---- TARGET LOST 警告（目标丢失后闪烁 3 秒） ----
+        tlost = st.get("target_lost_at", 0)
+        if tlost and (time.time() - tlost) < 3.0:
+            # 闪烁：每 400ms 交替
+            if int(time.time() * 2.5) % 2 == 0:
+                try:
+                    from ui.assets import get_font_medium
+                    fm = get_font_medium()
+                    warn = fm.render("TARGET LOST", True, (0, 255, 100))
+                    wr = warn.get_rect(center=(cx, cy + 50))
+                    # 半透明绿色背景条
+                    bg_rect = wr.inflate(20, 8)
+                    bg = pygame.Surface(bg_rect.size, pygame.SRCALPHA)
+                    bg.fill((0, 40, 0, 120))
+                    s.blit(bg, bg_rect)
+                    s.blit(warn, wr)
+                except Exception:
+                    pass
 
         # HUD
         try:

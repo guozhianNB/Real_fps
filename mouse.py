@@ -235,6 +235,10 @@ class MouseListener:
                 if self._game_active:
                     print("[Mouse] R → 广播 GAME_RELOAD")
                     self.emitter.emit("GAME_RELOAD")
+            elif hasattr(key, 'char') and key.char == 'x':
+                if self._game_active:
+                    print("[Mouse] X → 广播 GAME_LOCK")
+                    self.emitter.emit("GAME_LOCK")
         except AttributeError:
             pass
 

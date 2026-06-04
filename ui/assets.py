@@ -35,6 +35,10 @@ def get_font_large():
     """大号字体 (48px)。"""
     return get_font(48)
 
+def get_font_medium():
+    """中等字体 (36px)。"""
+    return get_font(36)
+
 def get_font_huge():
     """超大号粗体 (72px)。"""
     return get_font(72, bold=True)

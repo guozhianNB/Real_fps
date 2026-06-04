@@ -105,10 +105,17 @@ class Radar:
             py = y + 10 + norm_depth * (h - 20)
             py = max(y + 4, min(y + h - 4, py))
 
-            # 画目标点
-            if visible:
-                pygame.draw.circle(surface, COLOR_GREEN, (int(px), int(py)), 5)
-                pygame.draw.circle(surface, COLOR_GREEN, (int(px), int(py)), 8, 1)
+            # 画目标点（存活=圆点，击杀=绿色小叉）
+            if t.get("dead"):
+                # 击杀目标：绿色小叉，不闪烁
+                s = 6
+                cx_i, cy_i = int(px), int(py)
+                pygame.draw.line(surface, COLOR_GREEN, (cx_i - s, cy_i - s), (cx_i + s, cy_i + s), 2)
+                pygame.draw.line(surface, COLOR_GREEN, (cx_i + s, cy_i - s), (cx_i - s, cy_i + s), 2)
+            elif visible:
+                color = COLOR_YELLOW if t.get("locked") else COLOR_GREEN
+                pygame.draw.circle(surface, color, (int(px), int(py)), 5)
+                pygame.draw.circle(surface, color, (int(px), int(py)), 8, 1)
 
         # ---- 标签 ----
         label = self.font.render("B-SCOPE", True, COLOR_GREEN)
