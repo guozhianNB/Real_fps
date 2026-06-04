@@ -280,7 +280,8 @@ class UI:
                     self.kill_feed.add_kill(
                         e.__dict__.get("hit_zone", ""),
                         e.__dict__.get("score_delta", 0),
-                        e.__dict__.get("target_id", 0))
+                        e.__dict__.get("target_id", 0),
+                        e.__dict__.get("target_name", ""))
 
             try:
                 while True:

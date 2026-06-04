@@ -15,7 +15,7 @@ except ImportError:
 
 # ====== 直接在这里设置输入路径和参数 ======
 # 输入路径，可以是图片路径、视频路径或摄像头编号（如0）
-INPUT_PATH = r"D:\_project\ultralytics-8.4.41\image_video_test\PV.mp4"  # TODO: 修改为你的图片/视频路径，或摄像头编号（如0）
+INPUT_PATH = 0#r"D:\_project\ultralytics-8.4.41\image_video_test\PV.mp4"  # TODO: 修改为你的图片/视频路径，或摄像头编号（如0）
 # 识别方法：LBPH、EigenFace、FisherFace
 RECOGNIZE_METHOD = "LBPH"
 # 数据集目录

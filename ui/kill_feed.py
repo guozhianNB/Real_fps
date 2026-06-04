@@ -16,10 +16,11 @@ class KillFeed:
     def __init__(self):
         self.entries = []  # [(text, timer_ms), ...]
 
-    def add_kill(self, hit_zone, score_delta, target_id):
+    def add_kill(self, hit_zone, score_delta, target_id, target_name=""):
         """添加一条击杀信息。"""
         zone_text = "头部" if hit_zone == "head" else "身体"
-        text = f"目标 #{target_id}  {zone_text}  +{score_delta}"
+        who = target_name if target_name else f"#{target_id}"
+        text = f"{who}  {zone_text}  +{score_delta}"
         self.entries.append([text, KILL_DURATION])
         if len(self.entries) > MAX_ENTRIES:
             self.entries.pop(0)

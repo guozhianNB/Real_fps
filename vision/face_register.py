@@ -2,6 +2,7 @@
 from __future__ import annotations
 from pathlib import Path
 import cv2
+import numpy as np
 import re
 try:
     from ultralytics import YOLO
@@ -34,6 +35,45 @@ def detect_faces_yolo(img, yolo_model):
                 x1, y1, x2, y2 = map(int, box.xyxy[0].tolist())
                 faces.append((x1, y1, x2, y2))
     return faces
+
+
+def augment_face(gray_img):
+    """对单张灰度人脸做数据增强，返回多张变体。"""
+    h, w = gray_img.shape
+    variants = [gray_img]  # 原图
+
+    # 1. 水平镜像
+    variants.append(cv2.flip(gray_img, 1))
+
+    # 2. 小角度旋转 (±5°, ±10°)
+    for angle in [-10, -5, 5, 10]:
+        M = cv2.getRotationMatrix2D((w/2, h/2), angle, 1.0)
+        rotated = cv2.warpAffine(gray_img, M, (w, h), borderMode=cv2.BORDER_REFLECT)
+        variants.append(rotated)
+
+    # 3. 缩放 (±5%, ±10%)
+    for scale in [0.9, 0.95, 1.05, 1.1]:
+        new_w, new_h = int(w * scale), int(h * scale)
+        resized = cv2.resize(gray_img, (new_w, new_h))
+        if scale < 1:
+            # 放大回原尺寸（中心裁剪）
+            x = (new_w - w) // 2
+            y = (new_h - h) // 2
+            resized = resized[max(0,-y):max(0,-y)+h, max(0,-x):max(0,-x)+w] if scale<1 else resized
+        # 直接 resize 回标准尺寸（会在外部统一做，这里仅收集）
+        variants.append(cv2.resize(resized, (w, h)))
+
+    # 4. 亮度/对比度调整
+    for alpha, beta in [(0.8, 20), (1.0, -20), (1.2, 10), (0.9, -10)]:
+        adjusted = cv2.convertScaleAbs(gray_img, alpha=alpha, beta=beta)
+        variants.append(adjusted)
+
+    # 5. 高斯模糊（模拟远距离/失焦）
+    for ksize in [(3,3), (5,5)]:
+        blurred = cv2.GaussianBlur(gray_img, ksize, 0)
+        variants.append(blurred)
+
+    return variants
 
 
 
@@ -80,17 +120,20 @@ def register_faces_from_folder(input_dir: Path, output_dir: Path):
             print(f"未检测到人脸: {img_path}")
             continue
         
-        for  idx,(x1, y1, x2, y2) in enumerate(faces):
+        for idx, (x1, y1, x2, y2) in enumerate(faces):
             face_roi = img[y1:y2, x1:x2]
             if face_roi.size == 0:
                 continue
             face_roi = cv2.cvtColor(face_roi, cv2.COLOR_BGR2GRAY)
             face_roi = cv2.resize(face_roi, FACE_SIZE)
-            # 保存为 person_name_001.png 这种格式
-            file_path = person_dir / f"{person_name}_{image_count+1:03d}.png"
-            cv2.imwrite(str(file_path), face_roi)
-            print(f"已保存: {file_path}")
-            image_count += 1
+            # 数据增强：每张原图生成多张变体
+            variants = augment_face(face_roi)
+            for vi, variant in enumerate(variants):
+                variant = cv2.resize(variant, FACE_SIZE)
+                file_path = person_dir / f"{person_name}_{image_count+1:03d}_v{vi:02d}.png"
+                cv2.imwrite(str(file_path), variant)
+                print(f"已保存: {file_path.name}")
+                image_count += 1
 
     # 注册完毕 → 自动训练识别模型
     if image_count > 0:

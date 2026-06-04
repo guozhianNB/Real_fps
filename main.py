@@ -50,11 +50,28 @@ import json
 import math
 import time
 import sys
+from pathlib import Path
+import numpy as np
+import cv2
 import pyee
 from vision.vision import HumanTracker, get_camera_size
 from fire_notifier import send_fire, send_kill, close_sender, ReloadDoneListener, close_reload_sender
 from A_serial import SerialController
 from mouse import MouseListener
+
+# ====== 人脸识别初始化 ======
+try:
+    from ultralytics import YOLO
+    from vision.face_rec import load_model, detect_faces_yolo, FACE_SIZE
+    _face_yolo = YOLO(str(Path("vision/model/yolov11n-face.pt")))
+    _face_recognizer, _face_labels, _face_threshold = load_model(
+        "LBPH", Path("vision/model"))
+    print(f"[人脸] 识别就绪，已知 {len(_face_labels)} 人")
+except Exception as e:
+    _face_yolo = None
+    _face_recognizer = None
+    _face_labels = {}
+    print(f"[人脸] 未加载（不影响游戏）: {e}")
 
 # ============================================================
 #  常量
@@ -78,6 +95,26 @@ MODE_IDLE = "idle"
 MODE_PLAYING = "playing"
 MODE_PAUSED = "paused"
 MODE_OVER = "over"
+
+
+# ---------- 人体关键点索引（COCO 格式）----------
+NOSE = 0
+LEFT_EYE = 1
+RIGHT_EYE = 2
+LEFT_EAR = 3
+RIGHT_EAR = 4
+LEFT_SHOULDER = 5
+RIGHT_SHOULDER = 6
+LEFT_ELBOW = 7
+RIGHT_ELBOW = 8
+LEFT_WRIST = 9
+RIGHT_WRIST = 10
+LEFT_HIP = 11
+RIGHT_HIP = 12
+LEFT_KNEE = 13
+RIGHT_KNEE = 14
+LEFT_ANKLE = 15
+RIGHT_ANKLE = 16
 
 
 # ============================================================
@@ -238,7 +275,65 @@ def main():
     score_value = 0
     last_hit_time = 0
     ammo = 30
-    blacklist = set()  # 已击杀目标 ID 黑名单
+    blacklist = set()
+    face_registry = {}      # tracking_id → 人名
+    face_attempts = {}      # tracking_id → 已尝试帧数
+    seen_ids = set()
+    FACE_MAX_ATTEMPTS = 30  # 最多尝试 30 帧
+
+    def _recognize_new_face(tid, frame_bgr, kp_array, ids_array):
+        """对新人进行人脸识别，30 帧内成功则标记人名，否则 Unknown。"""
+        if _face_yolo is None or _face_recognizer is None:
+            face_registry[tid] = f"#{tid}"
+            return
+
+        # 找到该 ID 对应的人体关键点索引
+        indices = np.where(ids_array == tid)[0]
+        if len(indices) == 0:
+            return
+        idx = indices[0]
+        # NOSE = keypoint 0
+        nose_x, nose_y = int(kp_array[idx][0][0]), int(kp_array[idx][0][1])
+        if nose_x == 0 and nose_y == 0:
+            return  # 关键点无效
+
+        # 以鼻为中心扩展 m 像素
+        m = max(
+            abs(kp_array[idx][LEFT_EAR][0] - kp_array[idx][NOSE][0]),
+            abs(kp_array[idx][NOSE][1] - (kp_array[idx][LEFT_EYE][1] + kp_array[idx][RIGHT_EYE][1]) / 2)*6
+        )
+        x1 = int(max(0, nose_x - m))
+        y1 = int(max(0, nose_y - m))
+        x2 = int(nose_x + m)
+        y2 = int(nose_y + m)
+        face_region = frame_bgr[y1:y2, x1:x2]
+        if face_region.size == 0:
+            return
+
+        faces = detect_faces_yolo(face_region, _face_yolo)
+        if not faces:
+            face_attempts[tid] = face_attempts.get(tid, 0) + 1
+            if face_attempts[tid] >= FACE_MAX_ATTEMPTS:
+                face_registry[tid] = "Unknown"
+                print(f"[人脸] ID#{tid} → Unknown（30 帧未识别）")
+            return
+
+        fx1, fy1, fx2, fy2 = max(faces, key=lambda r: (r[2]-r[0])*(r[3]-r[1]))
+        face_roi = face_region[fy1:fy2, fx1:fx2]
+        if face_roi.size == 0:
+            return
+        face_gray = cv2.cvtColor(face_roi, cv2.COLOR_BGR2GRAY)
+        face_gray = cv2.resize(face_gray, FACE_SIZE)
+        label_id, conf = _face_recognizer.predict(face_gray)
+        if conf <= _face_threshold:
+            name = _face_labels.get(label_id, f"#{tid}")
+            face_registry[tid] = name
+            print(f"[人脸] ID#{tid} → {name} (置信度 {conf:.1f})")
+        else:
+            face_attempts[tid] = face_attempts.get(tid, 0) + 1
+            if face_attempts[tid] >= FACE_MAX_ATTEMPTS:
+                face_registry[tid] = "Unknown"
+                print(f"[人脸] ID#{tid} → Unknown（30 帧未识别，最高置信度 {conf:.1f}）")
 
     try:
         while game_running:
@@ -250,13 +345,27 @@ def main():
             # ---- 2b. 视觉分析 ----
             data = tracker.get_analysis(aim_point)
 
+            # 检测新出现的 ID → 人脸识别（用 NOSE 关键点扩展）
+            current_ids = {int(tid) for tid in data["box"].keys()}
+            new_ids = current_ids - seen_ids
+            if new_ids:
+                frame_bgr, result, _ = tracker.get_latest()
+                if frame_bgr is not None and result is not None and result.keypoints is not None:
+                    kp_arr = result.keypoints.xy.cpu().numpy()
+                    ids_arr = getattr(result.boxes, "id", None)
+                    if ids_arr is not None:
+                        ids_arr = ids_arr.cpu().numpy()
+                        for tid in new_ids:
+                            if tid not in face_registry:
+                                _recognize_new_face(tid, frame_bgr, kp_arr, ids_arr)
+            seen_ids = current_ids
+
             # 过滤黑名单：只保留未击杀的目标
             alive_head = [tid for tid in data["aim"]["head"] if tid not in blacklist]
             alive_body = [tid for tid in data["aim"]["body"] if tid not in blacklist]
 
             # ---- 2c. 开火检测 ----
             on_target = data["num"] > 0 and (len(alive_head) > 0 or len(alive_body) > 0)
-            # 左键按下 + 准星指向目标 → 开火
             if not reloading and ammo and left_pressed and (now_ms - last_hit_time) >= FIRE_COOLDOWN_MS:
                 last_hit_time = now_ms
                 v_y += 10
@@ -273,10 +382,11 @@ def main():
 
                     score_value += score_delta
                     blacklist.add(killed_id)
-                    print(f"[击杀] 目标#{killed_id} {hit_zone} +{score_delta}")
+                    name = face_registry.get(killed_id, f"#{killed_id}")
+                    print(f"[击杀] {name} {hit_zone} +{score_delta}")
 
                     send_fire(hit_zone=hit_zone, score_delta=score_delta)
-                    send_kill(hit_zone=hit_zone, score_delta=score_delta, target_id=killed_id)
+                    send_kill(hit_zone=hit_zone, score_delta=score_delta, target_id=killed_id, target_name=name)
                 else:
                     # 左键按下 + 没有击中 → 开火，但不加分（可用于训练瞄准）
                     print("[开火] 未击中目标")

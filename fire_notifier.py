@@ -66,13 +66,14 @@ def send_fire(hit_zone="", score_delta=0, event_type="fire"):
     except Exception:
         pass  # UDP 发失败无影响，UI 收不到下一帧也会知道
 
-def send_kill(hit_zone="", score_delta=0, target_id=0):
+def send_kill(hit_zone="", score_delta=0, target_id=0, target_name=""):
     """发送击杀事件。"""
     msg = json.dumps({
         "event": "kill",
         "hit_zone": hit_zone,
         "score_delta": score_delta,
         "target_id": target_id,
+        "target_name": target_name,
         "timestamp": time.time(),
     })
     try:
