@@ -26,6 +26,7 @@ from ui.hud import HUD
 from ui.effects import Effects
 from ui.gun_view import GunView
 from ui.kill_feed import KillFeed
+from fire_notifier import send_reload_done
 
 STATUS_FILE = "state.json"
 FIRE_EVENT = pygame.USEREVENT + 1
@@ -66,8 +67,11 @@ class UI:
         self._inspect_timer = 0.0
         self._reload_phase = 0
         self._reload_timer = 0.0
+        self._reload_gun = "ak"
+        self._reload_sound_played = set()
         self.gun_reload_frames = []
         self.kill_feed = KillFeed()
+        self.sfx = None
 
         print("[UI] 初始化完成，准备起飞 🚀")
 
@@ -195,21 +199,31 @@ class UI:
                 gv.cam_yaw = y
                 self.gun_inspect_frames.append(gv.render(0))
 
-            # 预渲染: 换弹动画帧（抬枪口30°→右转20°→持→恢复）
-            reload_pitch, reload_yaw = 22, 25
-            RELOAD_FRAMES = 15
+            # 预渲染: 换弹动画帧（抬起→换弹→拉栓→回正，总 3s）
+            reload_pitch, reload_yaw = 20, 22
+            bolt_yaw = -10       # 拉栓时 yaw 转到此角度（负=露出枪械右侧）
+            RELOAD_FRAMES = 60
             for i in range(RELOAD_FRAMES):
                 t = i / (RELOAD_FRAMES - 1)
-                if t < 1/3:       # 转入
-                    pt = t * 3
-                    ease = 1 - (1 - pt) ** 2
-                elif t < 2/3:     # 持住
-                    ease = 1.0
-                else:             # 转回
-                    pt = (t - 2/3) * 3
-                    ease = 1 - pt ** 2
-                p = normal_pitch + (reload_pitch - normal_pitch) * ease
-                y = 5 + (reload_yaw - 5) * ease
+                if t < 0.25:        # Phase 1: 抬起枪口
+                    pt = t / 0.25
+                    e = 1 - (1 - pt) ** 2          # ease out
+                    p_ease, y_ease = e, e
+                elif t < 0.50:      # Phase 2: 换弹（持住抬起位）
+                    p_ease, y_ease = 1.0, 1.0
+                elif t < 0.75:      # Phase 3: 拉栓（枪向右转，露出右侧）
+                    pt = (t - 0.50) / 0.25
+                    p_ease = 1.0
+                    # yaw: 从 reload_yaw(22°) 摆到 bolt_yaw(-10°) 再回来
+                    # 用 2π 的 cos 实现 0→1→0, 保证结束时回到 y_ease=1.0
+                    swing = (1 - np.cos(2 * np.pi * pt)) / 2
+                    y_ease = 1.0 + ((bolt_yaw - 5) / (reload_yaw - 5) - 1.0) * swing
+                else:               # Phase 4: 回正
+                    pt = (t - 0.75) / 0.25
+                    e = 1 - pt ** 2                # ease in
+                    p_ease, y_ease = e, e
+                p = normal_pitch + (reload_pitch - normal_pitch) * p_ease
+                y = 5 + (reload_yaw - 5) * y_ease
                 gv.cam_pitch = p
                 gv.cam_yaw = y
                 self.gun_reload_frames.append(gv.render(0))
@@ -234,6 +248,8 @@ class UI:
         self.radar = Radar(self._ww - B_SCOPE_W - RADAR_MARGIN, RADAR_MARGIN)
         self.hud = HUD()
         self.effects = Effects()
+        from music.sfx import SFXPlayer
+        self.sfx = SFXPlayer()
 
         self._start_json_reader()
         self._start_camera_reader()
@@ -264,6 +280,8 @@ class UI:
                     self._recoil_timer = self._recoil_duration
                     self._muzzle_timer = 80.0
                     self._inspect_phase = 0  # 开火打断验视
+                    if self.sfx:
+                        self.sfx.play_fire(e.__dict__.get("gun", "ak"))
                     if self.effects:
                         self.effects.add_hit_flash(
                             e.__dict__.get("hit_zone", ""),
@@ -276,12 +294,19 @@ class UI:
                     if self._reload_phase == 0:
                         self._reload_phase = 1
                         self._reload_timer = 0.0
+                        self._reload_gun = e.__dict__.get("gun", "ak")
+                        self._reload_sound_played.clear()
+                        if self.sfx:
+                            self.sfx.play_reload_part(self._reload_gun, "clipout")
+                            self._reload_sound_played.add("clipout")
                 elif e.type == KILL_EVENT:
                     self.kill_feed.add_kill(
                         e.__dict__.get("hit_zone", ""),
                         e.__dict__.get("score_delta", 0),
                         e.__dict__.get("target_id", 0),
                         e.__dict__.get("target_name", ""))
+                    if self.sfx:
+                        self.sfx.play_fire(e.__dict__.get("gun", "ak"))
 
             try:
                 while True:
@@ -318,19 +343,31 @@ class UI:
                 elif self._inspect_phase == 3 and self._inspect_timer > 500:
                     self._inspect_phase = 0
                     self._inspect_timer = 0
-            # 换弹状态机
+            # 换弹状态机（抬起0.4s → 换弹0.3s → 拉栓0.8s → 回正1.0s = 2.5s）
             if self._reload_phase > 0:
                 self._reload_timer += dt_ms
-                if self._reload_phase == 1 and self._reload_timer > 500:
+                # 音效时序：clipout(0s) → 1s → addammo → 0.5s → boltpull
+                if self.sfx:
+                    if self._reload_phase == 3 and self._reload_timer >= 300 \
+                            and "addammo" not in self._reload_sound_played:
+                        self.sfx.play_reload_part(self._reload_gun, "addammo")
+                        self._reload_sound_played.add("addammo")
+                if self._reload_phase == 1 and self._reload_timer > 400:
                     self._reload_phase = 2
                     self._reload_timer = 0
-                elif self._reload_phase == 2 and self._reload_timer > 500:
+                elif self._reload_phase == 2 and self._reload_timer > 300:
                     self._reload_phase = 3
                     self._reload_timer = 0
-                elif self._reload_phase == 3 and self._reload_timer > 500:
+                elif self._reload_phase == 3 and self._reload_timer > 800:
+                    self._reload_phase = 4
+                    self._reload_timer = 0
+                    if self.sfx and "boltpull" not in self._reload_sound_played:
+                        self.sfx.play_reload_part(self._reload_gun, "boltpull")
+                        self._reload_sound_played.add("boltpull")
+                elif self._reload_phase == 4 and self._reload_timer > 1000:
                     self._reload_phase = 0
                     self._reload_timer = 0
-                    from fire_notifier import send_reload_done
+                    self._reload_sound_played.clear()
                     send_reload_done()
             self.kill_feed.update(dt_ms)
             self._render(dt_ms)
@@ -455,14 +492,11 @@ class UI:
             elif self._reload_phase > 0 and self.gun_reload_frames:
                 total = self._reload_timer
                 phase = self._reload_phase
-                n = len(self.gun_reload_frames)
-                third = n // 3
-                if phase == 1:
-                    idx = int((total / 500) * third)
-                elif phase == 2:
-                    idx = third + int((total / 500) * third)
-                else:
-                    idx = third * 2 + int((total / 500) * third)
+                n = len(self.gun_reload_frames)  # 60
+                q = n // 4  # 15
+                durations = [400, 300, 800, 1000]
+                dur = durations[phase - 1]
+                idx = (phase - 1) * q + int((total / dur) * q)
                 idx = max(0, min(n - 1, idx))
                 s.blit(self.gun_reload_frames[idx], (gx, gy))
             elif self._recoil_timer > 0 and self.gun_frames:

@@ -91,7 +91,7 @@ SERIAL_PORT = None        # None=自动检测，可指定如 "COM3"
 SERIAL_BAUDRATE = 115200
 
 # 开火冷却
-FIRE_COOLDOWN_MS = 100    # 两次开火最短间隔（毫秒）
+FIRE_COOLDOWN_MS = 75    # 两次开火最短间隔（毫秒）
 
 # 模式
 MODE_IDLE = "idle"
@@ -294,14 +294,14 @@ def main():
     ml.emitter.on("GAME_PAUSE", lambda: emitter.emit("GAME_PAUSE"))
     ml.emitter.on("GAME_CONTINUE", lambda: emitter.emit("GAME_CONTINUE"))
     ml.emitter.on("GAME_OVER", lambda: emitter.emit("GAME_OVER"))
-    ml.emitter.on("GAME_INSPECT", lambda: send_fire(event_type="inspect"))
+    ml.emitter.on("GAME_INSPECT", lambda: send_fire(event_type="inspect", gun=gun))
 
     def on_reload():
         nonlocal reloading
         if not reloading:
             reloading = True
             print("[换弹] 开始换弹...")
-            send_fire(event_type="reload_start")
+            send_fire(event_type="reload_start", gun=gun)
     ml.emitter.on("GAME_RELOAD", on_reload)
 
     # 锁定模式
@@ -355,6 +355,8 @@ def main():
 
     print("[状态] 进入主循环（显示由 Pygame UI 独立渲染）")
     print("  按键:  P=暂停/继续  Esc=退出  R=换弹  Ctrl+C=强制退出")
+
+    gun = 'ak'
 
     score_value = 0
     last_hit_time = 0
@@ -475,12 +477,12 @@ def main():
                     name = face_registry.get(killed_id, f"#{killed_id}")
                     print(f"[击杀] {name} {hit_zone} +{score_delta}")
 
-                    send_fire(hit_zone=hit_zone, score_delta=score_delta)
-                    send_kill(hit_zone=hit_zone, score_delta=score_delta, target_id=killed_id, target_name=name)
+                    send_fire(hit_zone=hit_zone, score_delta=score_delta, gun=gun)
+                    send_kill(hit_zone=hit_zone, score_delta=score_delta, target_id=killed_id, target_name=name, gun=gun)
                 else:
                     # 左键按下 + 没有击中 → 开火，但不加分（可用于训练瞄准）
                     print("[开火] 未击中目标")
-                    send_fire(hit_zone=None, score_delta=0)
+                    send_fire(hit_zone=None, score_delta=0, gun=gun)
 
             # ---- 2d. 目标列表（写入 state.json，阵亡含 dead 标记） ----
             targets_json = []

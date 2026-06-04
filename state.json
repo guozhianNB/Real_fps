@@ -1,38 +1,24 @@
 {
-  "timestamp": 1780551218.1188686,
+  "timestamp": 1780557815.625959,
   "system_state": {
     "mode": "playing",
     "msg": "normal"
   },
   "score": {
-    "value": 60
+    "value": 150
   },
   "targets": [
     {
-      "id": 1,
+      "id": 18,
       "bbox": [
-        606,
-        257,
-        807,
-        688
+        703,
+        164,
+        939,
+        572
       ],
-      "cx": 706,
-      "cy": 472,
-      "depth": 234.7,
-      "dead": true,
-      "locked": false
-    },
-    {
-      "id": 2,
-      "bbox": [
-        735,
-        23,
-        842,
-        203
-      ],
-      "cx": 788,
-      "cy": 113,
-      "depth": 186.5,
+      "cx": 821,
+      "cy": 368,
+      "depth": 330.5,
       "dead": true,
       "locked": false
     }
@@ -45,7 +31,7 @@
     "status": "ERROR",
     "msg": "not initialized"
   },
-  "ammo": 13,
+  "ammo": 0,
   "show_boxes": true,
-  "target_lost_at": 0.0
+  "target_lost_at": 1780557786.6773398
 }

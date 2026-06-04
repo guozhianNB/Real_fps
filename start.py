@@ -79,7 +79,7 @@ tk.Radiobutton(mode_frame, text="🎮 游戏模式", variable=_mode, value="game
 tk.Radiobutton(mode_frame, text="📷 人脸注册", variable=_mode, value="register",
                font=("Arial", 12), command=_on_mode_change).pack(anchor="w", pady=3)
 
-# 游戏选项容器（默认显示）
+# 游戏选项容器（默认显示） 
 _game_frame = tk.Frame(window)
 _game_frame.pack(pady=(10, 5))
 tk.Label(_game_frame, text="游戏方案：", font=("Arial", 10, "bold")).pack(anchor="w")

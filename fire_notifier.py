@@ -46,18 +46,20 @@ def _get_sock():
         _fire_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     return _fire_sock
 
-def send_fire(hit_zone="", score_delta=0, event_type="fire"):
+def send_fire(hit_zone="", score_delta=0, event_type="fire", gun="ak"):
     """发送开火事件（UDP，不阻塞，fire-and-forget）。
     
     参数：
         hit_zone: "head" / "body" / ""
         score_delta: 本次得分
-        event_type: 事件类型，预留扩展
+        event_type: 事件类型
+        gun: 枪械名（用于 UI 播放对应音效）
     """
     msg = json.dumps({
         "event": event_type,
         "hit_zone": hit_zone,
         "score_delta": score_delta,
+        "gun": gun,
         "timestamp": time.time(),
     })
     sock = _get_sock()
@@ -66,7 +68,7 @@ def send_fire(hit_zone="", score_delta=0, event_type="fire"):
     except Exception:
         pass  # UDP 发失败无影响，UI 收不到下一帧也会知道
 
-def send_kill(hit_zone="", score_delta=0, target_id=0, target_name=""):
+def send_kill(hit_zone="", score_delta=0, target_id=0, target_name="", gun="ak"):
     """发送击杀事件。"""
     msg = json.dumps({
         "event": "kill",
@@ -74,6 +76,7 @@ def send_kill(hit_zone="", score_delta=0, target_id=0, target_name=""):
         "score_delta": score_delta,
         "target_id": target_id,
         "target_name": target_name,
+        "gun": gun,
         "timestamp": time.time(),
     })
     try:
