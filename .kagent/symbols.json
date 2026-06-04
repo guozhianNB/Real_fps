@@ -164,12 +164,12 @@
     },
     "ui/core.py": {
       "ipo_ts": 1780475023439,
-      "edit_count": 143,
-      "last_lines": 527,
-      "last_ts": 1780557396474,
+      "edit_count": 147,
+      "last_lines": 560,
+      "last_ts": 1780560614374,
       "delisted": false,
       "last_source": "onSave",
-      "last_content_hash": "af0e4f52"
+      "last_content_hash": "d7e1ff3a"
     },
     "ui/demo_reader.py": {
       "ipo_ts": 1780475023497,

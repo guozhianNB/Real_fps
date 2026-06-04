@@ -136,16 +136,49 @@ class UI:
         self._fire_listener.start()
 
     # --------------------------------------------------
+    #  加载闪屏
+    # --------------------------------------------------
+
+    @staticmethod
+    def _show_loading_screen():
+        """显示 "加载中..." 窗口，确保用户不会看到黑屏。"""
+        try:
+            w, h = 500, 200
+            pygame.display.set_mode((w, h))
+            pygame.display.set_caption("Real FPS")
+            screen = pygame.display.get_surface()
+            screen.fill((0, 0, 0))
+            try:
+                from ui.assets import get_font_large, get_font_small
+                font = get_font_large()
+                font_sub = get_font_small()
+            except Exception:
+                font = pygame.font.Font(None, 48)
+                font_sub = pygame.font.Font(None, 24)
+            text = font.render("加载中...", True, (0, 255, 100))
+            sub = font_sub.render("正在初始化，请稍候", True, (100, 255, 150))
+            screen.blit(text, (w // 2 - text.get_width() // 2, 60))
+            screen.blit(sub, (w // 2 - sub.get_width() // 2, 120))
+            pygame.display.flip()
+            # 消费启动期间积累的事件，防止窗口假死
+            pygame.event.pump()
+        except Exception:
+            pass
+
+    # --------------------------------------------------
     #  启动 UI（阻塞，直到窗口关闭）
     # --------------------------------------------------
 
     def start(self):
         pygame.init()
 
-        # --- ① 先获取目标分辨率 ---
+        # --- ① 先获取目标分辨率（在创建任何窗口前） ---
         info = pygame.display.Info()
         self._ww = info.current_w if self.fullscreen else SCREEN_WIDTH
         self._wh = info.current_h if self.fullscreen else SCREEN_HEIGHT
+
+        # --- ② 加载闪屏 ---
+        self._show_loading_screen()
 
         # --- ② 预渲染枪械动画序列（缓动归位） ---
         self.gun_surf = None
