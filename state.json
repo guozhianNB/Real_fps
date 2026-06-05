@@ -1,7 +1,7 @@
 {
-  "timestamp": 1780638746.2031953,
+  "timestamp": 1780648480.7095027,
   "system_state": {
-    "mode": "paused",
+    "mode": "playing",
     "msg": "normal"
   },
   "score": {
@@ -11,14 +11,14 @@
     {
       "id": 1,
       "bbox": [
-        224,
-        93,
-        336,
-        358
+        676,
+        160,
+        964,
+        736
       ],
-      "cx": 280,
-      "cy": 225,
-      "depth": 157.7,
+      "cx": 820,
+      "cy": 448,
+      "depth": 256.8,
       "dead": true,
       "locked": false
     }
@@ -28,10 +28,10 @@
     720
   ],
   "serial": {
-    "status": "ERROR",
-    "msg": "not initialized"
+    "status": "OK",
+    "msg": "connected"
   },
-  "ammo": 24,
-  "show_boxes": false,
-  "target_lost_at": 0.0
+  "ammo": 29,
+  "show_boxes": true,
+  "target_lost_at": 1780648466.3491647
 }
