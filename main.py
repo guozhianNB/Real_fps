@@ -83,11 +83,11 @@ except Exception as e:
 STATE_FILE = "state.json"
 
 # 鼠标灵敏度
-PITCH = 1.0   # 俯仰（Y 轴）
-YAW = 1.0     # 水平（X 轴）
+PITCH = 0.1   # 俯仰（Y 轴）
+YAW = 0.1     # 水平（X 轴）
 
 # 串口
-SERIAL_PORT = None        # None=自动检测，可指定如 "COM3"
+SERIAL_PORT = "COM6"        # None=自动检测，可指定如 "COM3"
 SERIAL_BAUDRATE = 115200
 
 # 开火冷却
@@ -423,6 +423,7 @@ def main():
 
     try:
         bgm.play(loops=-1, fade_ms=2000) # 无限循环 + 2秒淡入
+        #===================================== 主循环开始 ======================================
         while game_running:
             now_ms = time.time() * 1000
 
@@ -456,7 +457,7 @@ def main():
             fire_trigger = left_pressed or (AUTO_FIRE and on_target)
             if not reloading and (ammo or INFINITE_AMMO) and fire_trigger and (now_ms - last_hit_time) >= FIRE_COOLDOWN_MS:
                 last_hit_time = now_ms
-                v_y += 10
+                v_y -= 2.0
                 ammo -= 1
                 if on_target:
                     if len(alive_head) > 0:
@@ -561,7 +562,7 @@ def main():
                     v_x += dx * YAW
                     v_y += dy * PITCH
                 v_x = max(-90, min(90, v_x))
-                v_y = max(-90, min(90, v_y))
+                v_y = max(-60, min(60, v_y))
                 if serial and serial.connected:
                     serial.send_angles(v_x, v_y)
 

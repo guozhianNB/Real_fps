@@ -47,29 +47,14 @@ UART_HandleTypeDef huart2;
 
 /* USER CODE BEGIN PV */
 
-// ====== PID 控制器结构体 ======
-typedef struct {
-    float Kp, Ki, Kd;          // PID 参数
-    float integral;            // 积分项
-    float prev_error;          // 上一次误差（用于微分）
-    float output_limit;        // 输出限幅
-    float integral_limit;      // 积分限幅（抗积分饱和）
-} PID_t;
-
-PID_t pid_x;                   // 水平舵机 PID
-PID_t pid_y;                   // 俯仰舵机 PID
-
-float servo_angle_x = 90.0f;   // 水平舵机当前角度 (0-180)
-float servo_angle_y = 90.0f;   // 俯仰舵机当前角度 (0-180)
-
 // ====== 串口逐字节接收 ======
 uint8_t rx_byte;               // 单字节接收缓冲区
 char line_buf[32];             // 行缓冲区
 uint8_t line_idx = 0;          // 行缓冲区索引
 volatile uint8_t line_ready = 0; // 新行接收完成标志
 
-volatile int16_t error_x = 0;  // 最新水平误差值
-volatile int16_t error_y = 0;  // 最新俯仰误差值
+volatile int16_t angle_x = 0;  // 水平舵机目标角度 (-90 ~ 90)
+volatile int16_t angle_y = 0;  // 俯仰舵机目标角度 (-90 ~ 90)
 
 /* USER CODE END PV */
 
@@ -87,75 +72,32 @@ static void MX_USART2_UART_Init(void);
 /* USER CODE BEGIN 0 */
 
 // ============================================================
-//  PID 控制器初始化
+//  设置舵机角度 → PWM 脉宽
+//  SG90 舵机: 50Hz (20ms 周期)
+//  TIM 频率 100kHz (72MHz / 720 prescaler)
+//  周期 2000 ticks = 20ms
+//  映射: -90°→0°(500μs=50tick), 0°→90°(1500μs=150tick), +90°→180°(2500μs=250tick)
+//  公式: pulse = 150 + angle * 100 / 90
+//  验证: -90→150-100=50, 0→150, +90→150+100=250
 // ============================================================
-void PID_Init(PID_t *pid, float Kp, float Ki, float Kd, float limit)
+void SetServoAngle(TIM_HandleTypeDef *htim, uint32_t channel, int16_t angle)
 {
-  pid->Kp = Kp;
-  pid->Ki = Ki;
-  pid->Kd = Kd;
-  pid->integral = 0.0f;
-  pid->prev_error = 0.0f;
-  pid->output_limit = limit;
-  pid->integral_limit = limit * 0.5f;
-}
-
-// ============================================================
-//  PID 计算：输入误差，输出控制量
-// ============================================================
-float PID_Compute(PID_t *pid, float error, float dt)
-{
-  // 比例项
-  float p_term = pid->Kp * error;
-
-  // 积分项（带抗饱和）
-  pid->integral += error * dt;
-  if (pid->integral > pid->integral_limit)
-    pid->integral = pid->integral_limit;
-  if (pid->integral < -pid->integral_limit)
-    pid->integral = -pid->integral_limit;
-  float i_term = pid->Ki * pid->integral;
-
-  // 微分项
-  float d_term = pid->Kd * (error - pid->prev_error) / dt;
-  pid->prev_error = error;
-
-  // 总输出
-  float output = p_term + i_term + d_term;
-
-  // 输出限幅
-  if (output > pid->output_limit)
-    output = pid->output_limit;
-  if (output < -pid->output_limit)
-    output = -pid->output_limit;
-
-  return output;
-}
-
-// ============================================================
-//  设置舵机角度（0-180°）→ PWM 脉宽
-//  TIM 频率 100kHz → 周期 2000 = 20ms = 50Hz
-//  0°   = 500μs  = 50   ticks
-//  90°  = 1500μs = 150  ticks
-//  180° = 2500μs = 250  ticks
-// ============================================================
-void SetServoAngle(TIM_HandleTypeDef *htim, uint32_t channel, float angle)
-{
-  if (angle < 0.0f)   angle = 0.0f;
-  if (angle > 180.0f) angle = 180.0f;
-  uint16_t pulse = (uint16_t)(50.0f + angle * 200.0f / 180.0f);
+  if (angle < -90) angle = -90;
+  if (angle >  90) angle =  90;
+  uint16_t pulse = (uint16_t)(150 + angle * 100 / 90);
   __HAL_TIM_SET_COMPARE(htim, channel, pulse);
 }
 
 // ============================================================
-//  解析串口行数据：格式 "error_x,error_y"
+//  解析串口行数据：格式 "angle_x,angle_y"
+//  angle_x/y 范围 -90 ~ 90
 // ============================================================
-void ParseErrorLine(const char *line)
+void ParseAngleLine(const char *line)
 {
-  int e1 = 0, e2 = 0;
-  if (sscanf(line, "%d,%d", &e1, &e2) == 2) {
-    error_x = (int16_t)e1;
-    error_y = (int16_t)e2;
+  int a1 = 0, a2 = 0;
+  if (sscanf(line, "%d,%d", &a1, &a2) == 2) {
+    angle_x = (int16_t)a1;
+    angle_y = (int16_t)a2;
     line_ready = 1;
   }
 }
@@ -168,16 +110,14 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
   if (huart->Instance == USART2)
   {
     if (rx_byte == '\n') {
-      // 收到换行 → 一行结束
       line_buf[line_idx] = '\0';
       if (line_idx > 0) {
-        ParseErrorLine(line_buf);
+        ParseAngleLine(line_buf);
       }
       line_idx = 0;
     } else if (line_idx < sizeof(line_buf) - 1) {
       line_buf[line_idx++] = rx_byte;
     }
-    // 继续接收下一个字节
     HAL_UART_Receive_IT(&huart2, &rx_byte, 1);
   }
 }
@@ -221,16 +161,12 @@ int main(void)
   HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_1);
   HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_1);
 
-  // 舵机回中
-  SetServoAngle(&htim1, TIM_CHANNEL_1, 90.0f);
-  SetServoAngle(&htim2, TIM_CHANNEL_1, 90.0f);
-  servo_angle_x = 90.0f;
-  servo_angle_y = 90.0f;
-
-  // 初始化 PID 控制器
-  // Kp=1.0, Ki=0.1, Kd=0.05, 输出限幅 ±5°/周期
-  PID_Init(&pid_x, 1.0f, 0.1f, 0.05f, 5.0f);
-  PID_Init(&pid_y, 1.0f, 0.1f, 0.05f, 5.0f);
+  // 舵机回中 (0° 对应 SG90 的 90° 位置)
+  SetServoAngle(&htim1, TIM_CHANNEL_1, 30);
+  SetServoAngle(&htim2, TIM_CHANNEL_1, 30);
+  HAL_Delay(500); // 舵机连接测试
+  SetServoAngle(&htim1, TIM_CHANNEL_1, 0);
+  SetServoAngle(&htim2, TIM_CHANNEL_1, 0);
 
   // 启动串口逐字节接收
   HAL_UART_Receive_IT(&huart2, &rx_byte, 1);
@@ -238,46 +174,24 @@ int main(void)
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
-  uint32_t last_tick = HAL_GetTick();
   while (1)
   {
-    uint32_t now = HAL_GetTick();
-    float dt = (now - last_tick) / 1000.0f;
-    if (dt < 0.001f) dt = 0.001f;  // 防止除零
-    if (dt > 0.1f)   dt = 0.1f;    // 防止长时间暂停后突变
-    last_tick = now;
-
-    // ---- 如果有新误差数据，执行 PID 计算 ----
+    // ---- 收到新角度数据，直接设置舵机 ----
     if (line_ready) {
       line_ready = 0;
 
-      // 保存当前误差（关中断保护）
+      // 关中断读取，防止数据竞争
       __disable_irq();
-      int16_t ex = error_x;
-      int16_t ey = error_y;
+      int16_t a1 = angle_x;
+      int16_t a2 = angle_y;
       __enable_irq();
 
-      // PID 计算 → 角度调整量
-      float adj_x = PID_Compute(&pid_x, (float)ex, dt);
-      float adj_y = PID_Compute(&pid_y, (float)ey, dt);
-
-      // 更新舵机角度（累积式）
-      servo_angle_x += adj_x;
-      servo_angle_y += adj_y;
-
-      // 限幅到机械行程内
-      if (servo_angle_x < 0.0f)   servo_angle_x = 0.0f;
-      if (servo_angle_x > 180.0f) servo_angle_x = 180.0f;
-      if (servo_angle_y < 0.0f)   servo_angle_y = 0.0f;
-      if (servo_angle_y > 180.0f) servo_angle_y = 180.0f;
-
-      // 更新 PWM
-      SetServoAngle(&htim1, TIM_CHANNEL_1, servo_angle_x);
-      SetServoAngle(&htim2, TIM_CHANNEL_1, servo_angle_y);
+      // 直接设置舵机角度 (-90~90 映射到 SG90 的 0°~180°)
+      SetServoAngle(&htim1, TIM_CHANNEL_1, a1);
+      SetServoAngle(&htim2, TIM_CHANNEL_1, a2);
     }
 
-    // 每 10ms 循环一次 ≈ 100Hz
-    HAL_Delay(10);
+    HAL_Delay(5);
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
@@ -297,10 +211,13 @@ void SystemClock_Config(void)
   /** Initializes the RCC Oscillators according to the specified parameters
   * in the RCC_OscInitTypeDef structure.
   */
-  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSI;
+  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSE;
+  RCC_OscInitStruct.HSEState = RCC_HSE_ON;
+  RCC_OscInitStruct.HSEPredivValue = RCC_HSE_PREDIV_DIV1;
   RCC_OscInitStruct.HSIState = RCC_HSI_ON;
-  RCC_OscInitStruct.HSICalibrationValue = RCC_HSICALIBRATION_DEFAULT;
-  RCC_OscInitStruct.PLL.PLLState = RCC_PLL_NONE;
+  RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
+  RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSE;
+  RCC_OscInitStruct.PLL.PLLMUL = RCC_PLL_MUL9;
   if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK)
   {
     Error_Handler();
@@ -310,12 +227,12 @@ void SystemClock_Config(void)
   */
   RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_HCLK|RCC_CLOCKTYPE_SYSCLK
                               |RCC_CLOCKTYPE_PCLK1|RCC_CLOCKTYPE_PCLK2;
-  RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_HSI;
+  RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
   RCC_ClkInitStruct.AHBCLKDivider = RCC_SYSCLK_DIV1;
-  RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV1;
+  RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV2;
   RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV1;
 
-  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_0) != HAL_OK)
+  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_2) != HAL_OK)
   {
     Error_Handler();
   }

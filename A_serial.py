@@ -110,12 +110,13 @@ class SerialController:
 
         参数：
             yaw:   水平角度 (-90 ~ 90)，正=右，负=左
-            pitch: 俯仰角度 (-90 ~ 90)，正=下，负=上
+            pitch: 俯仰角度 (- 60~ 60)，正=下，负=上
+            舵机yaw轴与屏幕水平相反，所以发送时取负值。
         """
-        # 限幅到 ±90°
+        # 限幅
         yaw = max(-90, min(90, int(round(yaw))))
-        pitch = max(-90, min(90, int(round(pitch))))
-        cmd = f"{yaw},{pitch}\n"
+        pitch = max(-60, min(60, int(round(pitch))))
+        cmd = f"{-yaw},{pitch}\n"
         self._write(cmd)
 
     def send_raw(self, raw_string):

@@ -12,7 +12,7 @@ from urllib.parse import urlparse
 
 #
 MODEL_PATH = Path(__file__).resolve().parent / "model" / "yolo26n-pose.pt"
-CAMERA_PATH = "http://127.0.0.1:8010/snapshot"
+CAMERA_PATH = "http://127.0.0.1:8010/snapshot_thumb"
 CAMERA_SIZE_PATH = "http://127.0.0.1:8010/size"
 
 # ---------- 人体关键点索引（COCO 格式）----------
@@ -123,9 +123,34 @@ class HumanTracker:
             return self.latest_frame, self.latest_result, dict(self.trajectories)
 
     def get_analysis(self, aim_point):
-        """获取最新帧的分析结果（JSON 格式字典）。"""
+        """获取最新帧的分析结果（JSON 格式字典）。
+
+        注意：aim_point 是"全分辨率"坐标系下的准心坐标，
+        而 YOLO 推理在缩略图 (640x480) 上进行，
+        因此需要将 aim_point 等比缩放到缩略图坐标系。
+        """
         frame, result, _ = self.get_latest()
-        return process_frame(frame, result, aim_point)
+        if frame is not None:
+            h_thumb, w_thumb = frame.shape[:2]
+        else:
+            # 用相机 /size 接口获取全分辨率，/snapshot_thumb 固定 640x480
+            w_thumb, h_thumb = 640, 480
+
+        # 获取全分辨率尺寸（首次从相机服务查询，后续缓存）
+        if not hasattr(self, '_cam_w') or not hasattr(self, '_cam_h'):
+            self._cam_w, self._cam_h = get_camera_size()
+            if not self._cam_w:
+                self._cam_w, self._cam_h = 1920, 1080
+
+        # 缩放 aim_point 到缩略图坐标系
+        if self._cam_w > 0 and self._cam_h > 0:
+            sx = w_thumb / self._cam_w
+            sy = h_thumb / self._cam_h
+            aim_scaled = (aim_point[0] * sx, aim_point[1] * sy)
+        else:
+            aim_scaled = aim_point
+
+        return process_frame(frame, result, aim_scaled)
 
     def release(self):
         """停止后台线程并释放资源。"""
