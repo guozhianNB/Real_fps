@@ -3,9 +3,9 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-
 import cv2
 import numpy as np
+from PIL import Image, ImageDraw, ImageFont
 try:
     from ultralytics import YOLO
 except ImportError:
@@ -54,6 +54,82 @@ def detect_faces_yolo(img, yolo_model):
                     continue
                 faces.append((x1, y1, x2, y2))
     return faces
+
+
+# ── 中文文本渲染 ──────────────────────────────────────────────
+_FONT_CACHE: dict[str, ImageFont.FreeTypeFont | None] = {}
+
+def _get_cn_font(size: int = 20) -> ImageFont.FreeTypeFont | None:
+    """获取支持中文的字体，优先使用系统中文字体，缓存结果。"""
+    key = str(size)
+    if key in _FONT_CACHE:
+        return _FONT_CACHE[key]
+    # Windows 常见中文字体路径（按优先级）
+    candidates = [
+        "C:/Windows/Fonts/msyh.ttc",       # 微软雅黑
+        "C:/Windows/Fonts/simhei.ttf",     # 黑体
+        "C:/Windows/Fonts/simsun.ttc",     # 宋体
+        "C:/Windows/Fonts/msyhbd.ttc",     # 微软雅黑粗体
+        "C:/Windows/Fonts/yahei.ttf",
+        "C:/Windows/Fonts/Deng.ttf",       # 等线
+    ]
+    for path in candidates:
+        try:
+            font = ImageFont.truetype(path, size)
+            _FONT_CACHE[key] = font
+            return font
+        except (IOError, OSError):
+            continue
+    _FONT_CACHE[key] = None
+    return None
+
+
+def put_text_cn(
+    img: np.ndarray,
+    text: str,
+    org: tuple[int, int],
+    color: tuple[int, int, int] = (0, 255, 0),
+    font_scale: float = 0.7,
+    thickness: int = 2,
+) -> None:
+    """在 OpenCV 图像上绘制文本（支持中文）。
+
+    当文本全部为 ASCII 时仍使用 cv2.putText（性能更好）；
+    包含非 ASCII 字符时自动使用 PIL 渲染中文字体。
+    """
+    # 纯 ASCII → 用 OpenCV 原生绘制（更快）
+    if text.isascii():
+        cv2.putText(img, text, org, cv2.FONT_HERSHEY_SIMPLEX,
+                    font_scale, color, thickness, cv2.LINE_AA)
+        return
+
+    font = _get_cn_font()
+    if font is None:
+        # 没有中文字体 → fallback 到 OpenCV（至少显示 ASCII 部分）
+        cv2.putText(img, text, org, cv2.FONT_HERSHEY_SIMPLEX,
+                    font_scale, color, thickness, cv2.LINE_AA)
+        return
+
+    # OpenCV (BGR) → PIL (RGB)
+    img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+    pil_img = Image.fromarray(img_rgb)
+    draw = ImageDraw.Draw(pil_img)
+
+    # 字体大小近似换算：font_scale=0.7 → 约 18px
+    font_size = max(12, int(font_scale * 26))
+    font = _get_cn_font(font_size)
+    if font is None:
+        return
+
+    # 描边（黑色边框）增强可读性
+    x, y = org
+    for dx, dy in [(-1, -1), (-1, 1), (1, -1), (1, 1)]:
+        draw.text((x + dx, y + dy), text, font=font, fill=(0, 0, 0))
+    draw.text((x, y), text, font=font, fill=(color[2], color[1], color[0]))
+
+    # PIL → OpenCV (BGR)
+    img[:] = cv2.cvtColor(np.asarray(pil_img), cv2.COLOR_RGB2BGR)
+
 
 # 创建人脸识别器，支持LBPH/EigenFace/FisherFace三种方法
 def create_recognizer(method: str):
@@ -134,7 +210,7 @@ def train_and_save_recognizer(method: str, data_dir: Path, model_dir: Path):
     labels_path = model_dir / f"{method.lower()}_labels.json"
     recognizer.save(str(model_path))
     with labels_path.open("w", encoding="utf-8") as fp:
-        json.dump({str(k): v for k, v in id_to_label.items()}, fp, ensure_ascii=True, indent=2)
+        json.dump({str(k): v for k, v in id_to_label.items()}, fp, ensure_ascii=False, indent=2)
 
     return recognizer, id_to_label, threshold
 
@@ -237,14 +313,11 @@ def _draw_and_show_yolo(frame, yolo_model, recognizer, id_to_label, threshold, w
             text = f"Unknown ({confidence:.1f})"
             color = (0, 0, 255)
         cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
-        cv2.putText(
+        put_text_cn(
             frame,
             text,
             (x1, max(20, y1 - 10)),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.7,
-            color,
-            2,
+            color=color,
         )
     cv2.imshow(window_name, frame)
 

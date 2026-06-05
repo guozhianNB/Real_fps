@@ -19,3 +19,4 @@ ultralytics
 PyOpenGL
 PyOpenGL_accelerate
 opencv-contrib-python
+Pillow                # 中文文字渲染（人脸识别用）
