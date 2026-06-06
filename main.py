@@ -236,6 +236,14 @@ def main():
     v_y = 0  # 云台 pitch 角目标 (-90~90)
     autoaim = AutoAimPID()  # PID 自瞄控制器
 
+    # C 模式：初始定位到 -90°，开启自动搜索
+    if GMode == "C":
+        v_x = -90
+        v_y = 0
+        if serial and serial.connected:
+            serial.send_angles(v_x, v_y)
+        print("[自动搜索] C 模式启动，云台转至 -90°，开始遍历搜索")
+
     # 1d. 鼠标监听器（后台线程自动启动，start() 后开始采集）
     ml = MouseListener(
         sensitivity=1.0, deadzone=2,
@@ -357,6 +365,11 @@ def main():
     print("  按键:  P=暂停/继续  Esc=退出  R=换弹  Ctrl+C=强制退出")
 
     gun = 'ak'
+
+    # FPS 计数器
+    _fps_counter = 0
+    _fps_timer = time.time()
+    _last_frame_time = time.time()
 
     score_value = 0
     last_hit_time = 0
@@ -535,9 +548,33 @@ def main():
                 target_lost_at=target_lost_at,
             )
 
-            # ---- 2g. 视角控制（锁定=PID自瞄，否则鼠标控制） ----
+            # ---- 2g. 视角控制（锁定=PID自瞄/C模式自动搜索，否则鼠标控制） ----
             if current_mode == MODE_PLAYING:
-                if LOCK and locked_id is not None:
+                if LOCK and GMode == "C" and locked_id is None:
+                    # ==== C 模式：自动搜索 + 自动锁定 ====
+                    SEARCH_SPEED = 0.8  # °/帧，约 24°/s @ 30fps
+
+                    # 检查当前视野内是否有活目标
+                    alive_targets = [t for t in targets_json if not t["dead"]]
+                    if alive_targets:
+                        # 有目标 → 锁定最近的
+                        best = min(alive_targets,
+                                   key=lambda t: (t["cx"] - aim_point[0])**2 +
+                                                  (t["cy"] - aim_point[1])**2)
+                        locked_id = best["id"]
+                        autoaim.reset()
+                        print(f"[自动搜索] 发现目标 #{best['id']}，锁定")
+
+                    else:
+                        # 无目标 → 从当前位置向 +90° 遍历扫描
+                        if v_x < 90:
+                            v_x += SEARCH_SPEED
+                            v_x = min(90, v_x)
+                        else:
+                            # 扫到头了，停在 90°
+                            pass
+
+                elif LOCK and locked_id is not None:
                     # PID 自动瞄准锁定目标
                     locked_target = None
                     for t in targets_json:
@@ -552,12 +589,25 @@ def main():
                         v_x += dx_a
                         v_y += dy_a
                     else:
-                        # 目标丢失（出视野/遮挡）→ 解除锁定 + TARGET LOST
+                        # 目标丢失 → 自动重新锁定最近的可用目标
                         if locked_id is not None:
                             target_lost_at = time.time()
                             locked_id = None
                             autoaim.reset()
-                            print("[锁定] 目标丢失，解除锁定")
+                            # 在 targets_json 中找最近的活目标
+                            best_dist = float("inf")
+                            best_id = None
+                            for t in targets_json:
+                                if t["dead"]:
+                                    continue
+                                d = (t["cx"] - aim_point[0])**2 + (t["cy"] - aim_point[1])**2
+                                if d < best_dist:
+                                    best_dist = d
+                                    best_id = t["id"]
+                            if best_id is not None:
+                                locked_id = best_id
+                                autoaim.reset()
+                                print(f"[锁定] 目标丢失 → 自动重锁定 #{best_id}")
                 else:
                     v_x += dx * YAW
                     v_y += dy * PITCH
@@ -566,7 +616,20 @@ def main():
                 if serial and serial.connected:
                     serial.send_angles(v_x, v_y)
 
-            time.sleep(0.03)
+            # FPS 统计
+            _fps_counter += 1
+            now = time.time()
+            if now - _fps_timer >= 5.0:
+                fps = _fps_counter / (now - _fps_timer)
+                print(f"[FPS] 主循环: {fps:.1f}")
+                _fps_counter = 0
+                _fps_timer = now
+
+            # 自适应等待：保持 ~60fps 上限，不限制下限
+            elapsed = time.time() - _last_frame_time
+            wait = max(0.001, 0.016 - elapsed)
+            time.sleep(wait)
+            _last_frame_time = time.time()
 
     except KeyboardInterrupt:
         print("\n[中断] 用户强制退出")

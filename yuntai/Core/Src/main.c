@@ -53,8 +53,8 @@ char line_buf[32];             // 行缓冲区
 uint8_t line_idx = 0;          // 行缓冲区索引
 volatile uint8_t line_ready = 0; // 新行接收完成标志
 
-volatile int16_t angle_x = 0;  // 水平舵机目标角度 (-90 ~ 90)
-volatile int16_t angle_y = 0;  // 俯仰舵机目标角度 (-90 ~ 90)
+volatile float angle_x = 0.0f;  // 水平舵机目标角度 (-90 ~ 90)
+volatile float angle_y = 0.0f;  // 俯仰舵机目标角度 (-90 ~ 90)
 
 /* USER CODE END PV */
 
@@ -80,11 +80,11 @@ static void MX_USART2_UART_Init(void);
 //  公式: pulse = 150 + angle * 100 / 90
 //  验证: -90→150-100=50, 0→150, +90→150+100=250
 // ============================================================
-void SetServoAngle(TIM_HandleTypeDef *htim, uint32_t channel, int16_t angle)
+void SetServoAngle(TIM_HandleTypeDef *htim, uint32_t channel, float angle)
 {
-  if (angle < -90) angle = -90;
-  if (angle >  90) angle =  90;
-  uint16_t pulse = (uint16_t)(150 + angle * 100 / 90);
+  if (angle < -90.0f) angle = -90.0f;
+  if (angle >  90.0f) angle =  90.0f;
+  uint16_t pulse = (uint16_t)(150.0f + angle * 100.0f / 90.0f);
   __HAL_TIM_SET_COMPARE(htim, channel, pulse);
 }
 
@@ -94,10 +94,10 @@ void SetServoAngle(TIM_HandleTypeDef *htim, uint32_t channel, int16_t angle)
 // ============================================================
 void ParseAngleLine(const char *line)
 {
-  int a1 = 0, a2 = 0;
-  if (sscanf(line, "%d,%d", &a1, &a2) == 2) {
-    angle_x = (int16_t)a1;
-    angle_y = (int16_t)a2;
+  float a1 = 0.0f, a2 = 0.0f;
+  if (sscanf(line, "%f,%f", &a1, &a2) == 2) {
+    angle_x = a1;
+    angle_y = a2;
     line_ready = 1;
   }
 }
@@ -182,8 +182,8 @@ int main(void)
 
       // 关中断读取，防止数据竞争
       __disable_irq();
-      int16_t a1 = angle_x;
-      int16_t a2 = angle_y;
+      float a1 = angle_x;
+      float a2 = angle_y;
       __enable_irq();
 
       // 直接设置舵机角度 (-90~90 映射到 SG90 的 0°~180°)

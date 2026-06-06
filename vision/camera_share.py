@@ -1,28 +1,32 @@
 """
-摄像头共享服务 — 双分辨率版
+摄像头共享服务 — 双分辨率版 + 共享内存
 
-两个接口：
-  /snapshot        → 全分辨率 (1920x1080), quality=85  → UI 显示
-  /snapshot_thumb  → 缩略图   (640x480),   quality=70  → YOLO 推理
+两个接口（向后兼容）：
+  /snapshot        → 全分辨率 (1280x720), quality=85  → UI 显示
+  /snapshot_thumb  → 缩略图   (640x480),  quality=70  → YOLO 推理
+
+主要传输方式：共享内存（零拷贝），vision.py 直接读取原始帧。
 
 端口: 8010
 启动: uvicorn vision.camera_share:app --port 8010 --host 127.0.0.1
 """
 
 import cv2
+import os
 import threading
 import time
 
 from fastapi import FastAPI, HTTPException, Response
+from vision.shared_memory import create_shared_memories, write_frame, unlink_all
 
 # ============================================================
 #  摄像头参数
 # ============================================================
-CAM_W = 1920           # 采集宽度（全分辨率，供 UI 清晰显示）
-CAM_H = 1080           # 采集高度
+CAM_W = 1280           # 采集宽度
+CAM_H = 720            # 采集高度
 THUMB_W = 640          # 缩略图宽度（YOLO 推理用）
 THUMB_H = 480          # 缩略图高度
-SNAPSHOT_QUALITY = 85  # 全分辨率 JPEG 质量（85 肉眼几乎无损，体积小 70%）
+SNAPSHOT_QUALITY = 85  # 全分辨率 JPEG 质量
 THUMB_QUALITY = 70     # 缩略图 JPEG 质量
 
 
@@ -30,7 +34,9 @@ THUMB_QUALITY = 70     # 缩略图 JPEG 质量
 # 1. 摄像头管理器
 # --------------------------
 class CameraManager:
-    def __init__(self, camera_id=0):
+    def __init__(self, camera_id=None):
+        if camera_id is None:
+            camera_id = int(os.environ.get("CAMERA_ID", "0"))
         # 用 DSHOW 后端，让 CAP_PROP_BUFFERSIZE 生效
         self.cap = cv2.VideoCapture(camera_id, cv2.CAP_DSHOW)
         self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
@@ -46,6 +52,22 @@ class CameraManager:
         actual_w = int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         actual_h = int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
         print(f"摄像头分辨率: 目标 {CAM_W}x{CAM_H} → 实际 {actual_w}x{actual_h}")
+
+        # ---- 快门/曝光设置 ----
+        # CAP_PROP_AUTO_EXPOSURE: 0.25=手动  0.75=自动
+        # CAP_PROP_EXPOSURE: 负值=快门时间，越小越快（-6=1/64s，-7=1/128s，-8=1/256s）
+        exposure_str = os.environ.get("CAMERA_EXPOSURE", "-6")
+        try:
+            exposure_val = float(exposure_str)
+            # 先关自动曝光，再设手动值
+            if self.cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 0.25):
+                self.cap.set(cv2.CAP_PROP_EXPOSURE, exposure_val)
+                actual_exp = self.cap.get(cv2.CAP_PROP_EXPOSURE)
+                print(f"曝光设置: CAMERA_EXPOSURE={exposure_str} → 实际值={actual_exp}")
+            else:
+                print("注意: 该摄像头不支持手动曝光控制，使用默认自动曝光")
+        except ValueError:
+            print(f"警告: CAMERA_EXPOSURE '{exposure_str}' 不是有效数值，跳过曝光设置")
 
         # 丢弃前 10 帧，清空驱动内部缓冲区（解决 Windows 缓冲旧帧问题）
         for _ in range(10):
@@ -65,7 +87,17 @@ class CameraManager:
         self.running = True
         self.thread = threading.Thread(target=self._capture_loop, daemon=True)
         self.thread.start()
+
+        # 共享内存引用（由外部注入）
+        self.shm_thumb = None
+        self.shm_full = None
+
         print("摄像头服务已启动，后台采集线程运行中...")
+
+    def set_shared_memories(self, shm_thumb, shm_full):
+        """注入共享内存对象。"""
+        self.shm_thumb = shm_thumb
+        self.shm_full = shm_full
 
     def _encode_jpeg(self, frame, quality):
         """编码一张帧为 JPEG 字节。"""
@@ -83,7 +115,14 @@ class CameraManager:
                 self._frame_counter += 1
                 thumb = cv2.resize(frame, (THUMB_W, THUMB_H),
                                    interpolation=cv2.INTER_LINEAR)
-                # 预编码 JPEG（只需编一次，所有 HTTP 请求复用）
+
+                # ---- 写入共享内存（零拷贝路径）----
+                if self.shm_thumb is not None:
+                    write_frame(self.shm_thumb, thumb)
+                if self.shm_full is not None:
+                    write_frame(self.shm_full, frame)
+
+                # ---- 预编码 JPEG（保留 HTTP 路径，向后兼容）----
                 jpeg_full = self._encode_jpeg(frame, SNAPSHOT_QUALITY)
                 jpeg_thumb = self._encode_jpeg(thumb, THUMB_QUALITY)
 
@@ -138,14 +177,6 @@ class CameraManager:
         self.cap.release()
         print("摄像头资源已释放。")
 
-    def release(self):
-        """释放摄像头资源。"""
-        self.running = False
-        if self.thread.is_alive():
-            self.thread.join(timeout=1.0)
-        self.cap.release()
-        print("摄像头资源已释放。")
-
 
 camera_manager = None
 camera_error = None
@@ -167,13 +198,22 @@ def _get_camera_manager():
 @app.on_event("startup")
 def startup_event():
     global camera_manager, camera_error
+    cam_id = int(os.environ.get("CAMERA_ID", "0"))
+    print(f"正在初始化摄像头 #{cam_id}...")
     try:
-        camera_manager = CameraManager(camera_id=0)
+        camera_manager = CameraManager(camera_id=cam_id)
+
+        # 创建共享内存
+        shm_thumb, shm_full = create_shared_memories()
+        camera_manager.set_shared_memories(shm_thumb, shm_full)
+        print("共享内存已创建: camera_thumb / camera_full")
+
         camera_error = None
+        print(f"摄像头 #{cam_id} 初始化成功")
     except Exception as exc:
         camera_manager = None
         camera_error = str(exc)
-        print(f"摄像头初始化失败：{exc}")
+        print(f"摄像头 #{cam_id} 初始化失败：{exc}")
 
 
 @app.on_event("shutdown")
@@ -182,6 +222,8 @@ def shutdown_event():
     if camera_manager is not None:
         camera_manager.release()
         camera_manager = None
+    unlink_all()
+    print("共享内存已清理")
 
 
 @app.get("/size")

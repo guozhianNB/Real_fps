@@ -10,9 +10,10 @@ import json
 from collections import defaultdict
 from urllib.parse import urlparse
 
+from vision.shared_memory import open_thumb_reader, SharedMemoryReader
+
 #
 MODEL_PATH = Path(__file__).resolve().parent / "model" / "yolo26n-pose.pt"
-CAMERA_PATH = "http://127.0.0.1:8010/snapshot_thumb"
 CAMERA_SIZE_PATH = "http://127.0.0.1:8010/size"
 
 # ---------- 人体关键点索引（COCO 格式）----------
@@ -38,17 +39,12 @@ RIGHT_ANKLE = 16
 class HumanTracker:
     """使用 YOLO 跟踪模式持续追踪人体，并提供最新的跟踪结果。"""
 
-    def __init__(self, camera_url: str = CAMERA_PATH, model_path: str = MODEL_PATH):
-        self.camera_url = camera_url
-        
+    def __init__(self, camera_url: str = "", model_path: str = MODEL_PATH):
         self.model = YOLO(str(model_path))
 
-        # 解析 URL，建立 HTTP 长连接复用
-        parsed = urlparse(camera_url)
-        self._http_conn = http.client.HTTPConnection(
-            parsed.hostname, parsed.port, timeout=5
-        )
-        self._http_path = parsed.path or "/snapshot"
+        # 打开共享内存读取器（零拷贝获取帧）
+        self._shm_reader = None  # type: SharedMemoryReader | None
+        self._shm_retries = 0
 
         # 当前最新帧与跟踪结果
         self.latest_frame: np.ndarray | None = None
@@ -63,31 +59,46 @@ class HumanTracker:
         self.thread.start()
 
     def _grab_frame(self) -> np.ndarray | None:
-        """通过复用的 HTTP 连接拉取最新帧，避免端口耗尽。"""
-        try:
-            self._http_conn.request("GET", self._http_path)
-            resp = self._http_conn.getresponse()
-            data = np.asarray(bytearray(resp.read()), dtype=np.uint8)
-            return cv2.imdecode(data, cv2.IMREAD_COLOR)
-        except Exception:
-            # 连接断开时重建
+        """从共享内存读取最新帧（零拷贝，无 HTTP 开销）。"""
+        if self._shm_reader is None:
+            # 首次尝试连接共享内存
             try:
-                self._http_conn.close()
-                parsed = urlparse(self.camera_url)
-                self._http_conn = http.client.HTTPConnection(
-                    parsed.hostname, parsed.port, timeout=5
-                )
-            except Exception:
-                pass
+                self._shm_reader = open_thumb_reader()
+                self._shm_retries = 0
+                print("[共享内存] 已连接到 camera_thumb")
+            except FileNotFoundError:
+                self._shm_retries += 1
+                if self._shm_retries == 1:
+                    print("[共享内存] 等待摄像头服务创建共享内存...")
+                return None
+
+        try:
+            frame = self._shm_reader.read()
+            return frame
+        except Exception:
+            # 共享内存连接可能失效，重建
+            self._shm_reader.close()
+            self._shm_reader = None
             return None
 
     def _track_loop(self):
         """后台循环：持续拉取帧 → YOLO track → 保存结果。"""
+        _fps_count = 0
+        _fps_time = time.time()
         while self.running:
             frame = self._grab_frame()
             if frame is None:
-                time.sleep(0.03)
+                time.sleep(0.001)
                 continue
+
+            # FPS 统计
+            _fps_count += 1
+            now = time.time()
+            if now - _fps_time >= 5.0:
+                fps = _fps_count / (now - _fps_time)
+                print(f"[FPS] YOLO 跟踪: {fps:.1f}")
+                _fps_count = 0
+                _fps_time = now
 
             # YOLO 跟踪模式：只跟踪人（class=0）
             results = self.model.track(
@@ -178,10 +189,9 @@ class HumanTracker:
         self.running = False
         if self.thread.is_alive():
             self.thread.join(timeout=1.0)
-        try:
-            self._http_conn.close()
-        except Exception:
-            pass
+        if self._shm_reader is not None:
+            self._shm_reader.close()
+            self._shm_reader = None
 
 def body_aim(aim, quad):
     """判断准心是否落在四边形区域内（使用射线法）。"""
@@ -310,7 +320,7 @@ def main():
     aim_point = (cam_w // 2, cam_h // 2)
     print(f"摄像头尺寸: {cam_w}x{cam_h}, 准心: {aim_point}")
 
-    tracker = HumanTracker(CAMERA_PATH, MODEL_PATH)
+    tracker = HumanTracker()
     print("分析中... Ctrl+C 退出")
 
     try:

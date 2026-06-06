@@ -3,6 +3,30 @@ import cv2
 import numpy as np
 
 
+def list_available_cameras(max_index=10):
+    """扫描可用摄像头设备，返回 [(index, name), ...] 列表。
+
+    尝试打开每个索引的摄像头，能成功读到帧的认为可用。
+    max_index — 最大扫描索引（默认 10，涵盖多数情况）。
+    """
+    available = []
+    for i in range(max_index):
+        try:
+            cap = cv2.VideoCapture(i, cv2.CAP_DSHOW)
+            if cap.isOpened():
+                # 尝试读一帧确认确实可用
+                ret, _ = cap.read()
+                if ret:
+                    # 尝试获取设备名称（部分驱动支持）
+                    backend = cap.getBackendName()
+                    name = f"Camera {i} ({backend})"
+                    available.append((i, name))
+                cap.release()
+        except Exception:
+            pass
+    return available
+
+
 def get_camera_size():
     """查询摄像头图片的尺寸信息，返回 (width, height)。"""
     try:
