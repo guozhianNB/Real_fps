@@ -102,7 +102,7 @@ class RegisterApp:
         self.counter += 1
         filename = f"{name}_{self.counter:03d}.png"
         filepath = INPUT_DIR / filename
-        cv2.imwrite(str(filepath), frame)
+        cv2.imencode('.png', frame)[1].tofile(str(filepath))
         self.photo_list.insert(tk.END, f"{filename}")
         self.photo_list.see(tk.END)
         self.status_var.set(f"已保存: {filename}")

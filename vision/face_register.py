@@ -110,7 +110,7 @@ def register_faces_from_folder(input_dir: Path, output_dir: Path):
         person_dir = output_dir / person_name
         person_dir.mkdir(parents=True, exist_ok=True)
 
-        img = cv2.imread(str(img_path))
+        img = cv2.imdecode(np.fromfile(str(img_path), dtype=np.uint8), cv2.IMREAD_COLOR)
         if img is None:
             print(f"无法读取图片: {img_path}")
             continue
@@ -131,7 +131,7 @@ def register_faces_from_folder(input_dir: Path, output_dir: Path):
             for vi, variant in enumerate(variants):
                 variant = cv2.resize(variant, FACE_SIZE)
                 file_path = person_dir / f"{person_name}_{image_count+1:03d}_v{vi:02d}.png"
-                cv2.imwrite(str(file_path), variant)
+                cv2.imencode('.png', variant)[1].tofile(str(file_path))
                 print(f"已保存: {file_path.name}")
                 image_count += 1
 

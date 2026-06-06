@@ -176,7 +176,7 @@ def load_dataset(data_dir: Path):
         for image_path in sorted(person_dir.glob("*")):
             if image_path.is_file():
                 latest_data_mtime = max(latest_data_mtime, image_path.stat().st_mtime)
-            image = cv2.imread(str(image_path), cv2.IMREAD_GRAYSCALE)
+            image = cv2.imdecode(np.fromfile(str(image_path), dtype=np.uint8), cv2.IMREAD_GRAYSCALE)
             if image is None:
                 continue
             image = cv2.resize(image, FACE_SIZE)
@@ -269,7 +269,7 @@ def detect_and_recognize_auto(input_path, method: str, data_dir: Path, model_dir
     # 判断是否为图片
     img_exts = ['.jpg', '.jpeg', '.png', '.bmp', '.tiff']
     if any(input_path.lower().endswith(ext) for ext in img_exts):
-        img = cv2.imread(input_path)
+        img = cv2.imdecode(np.fromfile(input_path, dtype=np.uint8), cv2.IMREAD_COLOR)
         if img is None:
             print(f"无法读取图片: {input_path}")
             return
