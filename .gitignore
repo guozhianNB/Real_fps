@@ -13,3 +13,7 @@ Thumbs.db
 .DS_Store
 
 .kagent/
+
+#数据集
+vision/dataset/
+vision/input_images/
