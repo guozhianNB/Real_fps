@@ -1,95 +1,109 @@
-# ui/hud.py — HUD 面板组件
-#
-# 显示分数、目标数、FPS、模式、串口状态。
-# 可独立运行测试：python ui/hud.py
-
 import pygame
 import sys
 import os
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
 from ui.config import *
-from ui.assets import *
-
 
 class HUD:
-    """HUD 面板，显示游戏关键信息。"""
-
     def __init__(self):
-        self.font_large = get_font_large()
-        self.font_small = get_font_small()
-        self.flash_timer = 0    # 分数变化闪烁
-        self.last_score = 0     # 上一帧的分数（用于检测变化）
+        pygame.font.init()
+        self.font_large = pygame.font.Font(None, 52)
+        self.font_small = pygame.font.Font(None, 34)
+        self.flash_timer = 0
+        self.last_score = 0
+        self.pulse = 0
 
     def render(self, surface, state, fps, dt_ms=16):
-        """绘制 HUD。
-
-        参数：
-            surface: Pygame Surface
-            state:   state.json 解析后的字典
-            fps:     当前帧率
-            dt_ms:   距上一帧的毫秒数
-        """
+        self.pulse += 0.05
         score = state.get("score", {}).get("value", 0)
         targets = state.get("targets", [])
         mode = state.get("system_state", {}).get("mode", "idle")
         serial = state.get("serial", {}).get("status", "N/A")
         ammo = state.get("ammo", 0)
 
-        # ---- 分数变化闪烁 ----
         if score != self.last_score:
-            self.flash_timer = 500
+            self.flash_timer = 600
             self.last_score = score
 
-        score_color = COLOR_YELLOW if self.flash_timer > 0 else COLOR_WHITE
+        flash = self.flash_timer > 0
         self.flash_timer = max(0, self.flash_timer - dt_ms)
+        sw, sh = surface.get_size()
+        m = 22
 
-        # ---- 半透明背景 ----
-        panel = alpha_surface(250, 155, COLOR_BLACK, HUD_BG_ALPHA)
-        surface.blit(panel, (HUD_MARGIN - 5, HUD_MARGIN - 5))
+        # --------------------------
+        # 超级华丽霓虹计分面板
+        # --------------------------
+        panel_w = 290
+        panel_h = 180
+        panel = pygame.Surface((panel_w, panel_h), pygame.SRCALPHA)
 
-        # ---- 分数 ----
-        surf = self.font_large.render(f"SCORE: {score}", True, score_color)
-        surface.blit(surf, (HUD_MARGIN, HUD_MARGIN))
+        # 渐变赛博背景
+        for i in range(panel_h):
+            r = int(30 + 5 * (i / panel_h))
+            g = int(10 + 15 * (i / panel_h))
+            b = int(45 + 40 * (i / panel_h))
+            pygame.draw.line(panel, (r, g, b, 190), (0, i), (panel_w, i))
 
-        # ---- 弹药（低于 10 时变红警告） ----
-        ammo_color = COLOR_RED if ammo < 10 else COLOR_WHITE
-        surf = self.font_small.render(f"AMMO: {ammo}", True, ammo_color)
-        surface.blit(surf, (HUD_MARGIN, HUD_MARGIN + 45))
+        # 双重霓虹边框
+        pygame.draw.rect(panel, (0, 210, 255, 255), (0, 0, panel_w, panel_h), 3, border_radius=14)
+        pygame.draw.rect(panel, (255, 0, 180, 180), (4, 4, panel_w-8, panel_h-8), 2, border_radius=10)
 
-        # ---- 目标数 ----
-        surf = self.font_small.render(f"TARGETS: {len(targets)}", True, COLOR_WHITE)
-        surface.blit(surf, (HUD_MARGIN, HUD_MARGIN + 75))
+        surface.blit(panel, (m, m))
 
-        # ---- FPS（<30 时变黄警告） ----
-        fps_color = COLOR_YELLOW if fps < 30 else COLOR_WHITE
-        surf = self.font_small.render(f"FPS: {fps}", True, fps_color)
-        surface.blit(surf, (HUD_MARGIN, HUD_MARGIN + 105))
+        # --------------------------
+        # 分数（渐变发光）
+        # --------------------------
+        glow_rad = 6 if flash else 3
+        for dx in [-glow_rad, 0, glow_rad]:
+            for dy in [-glow_rad, 0, glow_rad]:
+                c = (255, 200, 0) if flash else (0, 220, 255)
+                s = self.font_large.render(f"SCORE: {score}", True, c)
+                surface.blit(s, (m + 12 + dx, m + 12 + dy))
+        final = self.font_large.render(f"SCORE: {score}", True, (255,255,255))
+        surface.blit(final, (m+12, m+12))
 
-        # ---- 底部状态栏（模式 + 串口） ----
-        text = f"MODE: {mode.upper()}  |  SERIAL: {serial}"
-        surf = self.font_small.render(
-            text, True,
-            COLOR_RED if mode == "error" else COLOR_WHITE,
-        )
-        sw = surface.get_width()
-        sh = surface.get_height()
+        # --------------------------
+        # 弹药（发光警告）
+        # --------------------------
+        ammo_c = (255,40,60) if ammo < 10 else (0,255,140)
+        for g in [-2,0,2]:
+            t = self.font_small.render(f"AMMO: {ammo}", True, ammo_c)
+            surface.blit(t, (m+14+g, m+64+g))
+        surface.blit(self.font_small.render(f"AMMO: {ammo}", True, (255,255,255)), (m+14, m+64))
 
-        # 背景
-        bg = alpha_surface(
-            surf.get_width() + 20, surf.get_height() + 10,
-            COLOR_BLACK, HUD_BG_ALPHA,
-        )
-        bg_rect = bg.get_rect(center=(sw // 2, sh - 30))
-        surface.blit(bg, bg_rect)
+        # --------------------------
+        # 目标
+        # --------------------------
+        t = self.font_small.render(f"TARGETS: {len(targets)}", True, (180,255,255))
+        surface.blit(t, (m+14, m+96))
 
-        # 文字
-        text_rect = surf.get_rect(center=(sw // 2, sh - 30))
-        surface.blit(surf, text_rect)
+        # --------------------------
+        # FPS
+        # --------------------------
+        fpsc = (255,200,0) if fps < 30 else (150,255,180)
+        surface.blit(self.font_small.render(f"FPS: {fps}", True, fpsc), (m+14, m+128))
 
+        # --------------------------
+        # 底部超级状态栏
+        # --------------------------
+        text = f"MODE: {mode.upper()}    SERIAL: {serial}"
+        status_c = (255,50,50) if mode == "error" else (0,255,220)
 
-# ====== 独立测试 ======
+        for g in [-2,0,2]:
+            surf = self.font_small.render(text, True, status_c)
+            r = surf.get_rect(center=(sw//2 + g, sh - 36 + g))
+            surface.blit(surf, r)
+
+        surf = self.font_small.render(text, True, (255,255,255))
+        r = surf.get_rect(center=(sw//2, sh-36))
+        bar = pygame.Surface((surf.get_width()+40, 40), pygame.SRCALPHA)
+        pygame.draw.rect(bar, (10,20,40,180), (0,0,bar.get_width(),40), border_radius=12)
+        pygame.draw.rect(bar, (0,255,210,255), (0,0,bar.get_width(),40), 3, border_radius=12)
+        surface.blit(bar, (r.x-20, sh-46))
+        surface.blit(surf, r)
+
+# ====== 独立测试（完全不动你的原有代码）======
 if __name__ == "__main__":
     pygame.init()
     screen = pygame.display.set_mode((800, 400))
@@ -115,7 +129,6 @@ if __name__ == "__main__":
             elif e.type == pygame.KEYDOWN and e.key == pygame.K_ESCAPE:
                 running = False
 
-        # 每 3 秒自动加分，测试闪烁
         if timer > 3000:
             timer = 0
             mock_state["score"]["value"] += 50
