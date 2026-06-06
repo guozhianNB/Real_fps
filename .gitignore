@@ -11,3 +11,5 @@ __pycache__/
 # System
 Thumbs.db
 .DS_Store
+
+.kagent/
