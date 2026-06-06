@@ -67,21 +67,40 @@ class UI:
         threading.Thread(target=loop, daemon=True).start()
 
     def _start_camera_reader(self):
+<<<<<<< HEAD
+=======
+        """后台：持续拉取摄像头画面（无 sleep，随摄像头帧率跑）"""
+>>>>>>> 73365d2431cfdf4d0ce7a6a17d89dca0830ec2da
         import requests
         def loop():
             while not self._stop.is_set():
                 try:
+<<<<<<< HEAD
                     resp = requests.get("http://127.0.0.1:8010/snapshot", timeout=CAMERA_TIMEOUT)
+=======
+                    resp = requests.get(
+                        "http://127.0.0.1:8010/snapshot",
+                        timeout=0.5,
+                    )
+>>>>>>> 73365d2431cfdf4d0ce7a6a17d89dca0830ec2da
                     if resp.status_code == 200:
                         arr = np.frombuffer(resp.content, dtype=np.uint8)
                         frame = cv2.imdecode(arr, cv2.IMREAD_COLOR)
                         if frame is not None:
                             rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                             self.event_q.put(("camera", rgb))
+<<<<<<< HEAD
                 except:
                     pass
                 time.sleep(0.033)
         threading.Thread(target=loop, daemon=True).start()
+=======
+                except Exception:
+                    pass  # 失败立刻重试，不 sleep
+
+        t = threading.Thread(target=loop, daemon=True)
+        t.start()
+>>>>>>> 73365d2431cfdf4d0ce7a6a17d89dca0830ec2da
 
     def _start_fire_listener(self):
         from fire_notifier import FireListener
@@ -319,9 +338,24 @@ class UI:
         s=self.screen
         st=self.latest_state
 
+<<<<<<< HEAD
         if self.latest_frame is not None:
             surf=pygame.surfarray.make_surface(self.latest_frame.swapaxes(0,1))
             s.blit(pygame.transform.scale(surf,(self._ww,self._wh)),(0,0))
+=======
+    def _render(self, dt_ms=16):
+        s = self.screen
+        st = self.latest_state
+
+        # 背景 — 用 frombuffer 替代 surfarray，省掉 swapaxes 开销
+        if self.latest_frame is not None:
+            surf = pygame.image.frombuffer(
+                self.latest_frame,
+                (self.latest_frame.shape[1], self.latest_frame.shape[0]),
+                "RGB",
+            )
+            s.blit(pygame.transform.scale(surf, (self._ww, self._wh)), (0, 0))
+>>>>>>> 73365d2431cfdf4d0ce7a6a17d89dca0830ec2da
         else:
             s.fill((10,10,18))
 
