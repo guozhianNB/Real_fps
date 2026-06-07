@@ -106,17 +106,17 @@ class SerialController:
             print(f"[Serial] 重连失败: {e}")
 
     def send_angles(self, yaw, pitch):
-        """发送舵机目标角度给单片机。
+        """发送舵机目标角度给单片机（支持浮点数）。
 
         参数：
             yaw:   水平角度 (-90 ~ 90)，正=右，负=左
-            pitch: 俯仰角度 (- 60~ 60)，正=下，负=上
-            舵机yaw轴与屏幕水平相反，所以发送时取负值。
+            pitch: 俯仰角度 (-60 ~ 60)，正=下，负=上
+            舵机 yaw 轴与屏幕水平相反，所以发送时取负值。
         """
-        # 限幅
-        yaw = max(-90, min(90, int(round(yaw))))
-        pitch = max(-60, min(60, int(round(pitch))))
-        cmd = f"{-yaw},{pitch}\n"
+        # 限幅（保留浮点精度，保留 1 位小数）
+        yaw = max(-90.0, min(90.0, yaw))
+        pitch = max(-60.0, min(60.0, pitch))
+        cmd = f"{-yaw:.1f},{pitch:.1f}\n"
         self._write(cmd)
 
     def send_raw(self, raw_string):

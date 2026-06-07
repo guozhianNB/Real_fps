@@ -1,24 +1,24 @@
 {
-  "timestamp": 1780761781.8777418,
+  "timestamp": 1780828275.4459195,
   "system_state": {
     "mode": "playing",
     "msg": "normal"
   },
   "score": {
-    "value": 350
+    "value": 0
   },
   "targets": [
     {
-      "id": 248,
+      "id": 13,
       "bbox": [
-        978,
-        -198,
-        1246,
-        327
+        1020,
+        -85,
+        1120,
+        199
       ],
-      "cx": 1112,
-      "cy": 64,
-      "depth": 333.8,
+      "cx": 1070,
+      "cy": 57,
+      "depth": 74.5,
       "dead": false,
       "locked": false
     }
@@ -32,6 +32,6 @@
     "msg": "connected"
   },
   "ammo": 30,
-  "show_boxes": false,
+  "show_boxes": true,
   "target_lost_at": 0.0
 }

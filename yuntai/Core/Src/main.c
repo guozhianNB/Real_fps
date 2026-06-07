@@ -89,16 +89,53 @@ void SetServoAngle(TIM_HandleTypeDef *htim, uint32_t channel, float angle)
 }
 
 // ============================================================
+//  自定义字符串→浮点数（轻量，不依赖 %f，newlib-nano 兼容）
+//  支持格式: "123", "123.456", "-12.34", "+0.5"
+// ============================================================
+float ParseFloat(const char *s, const char **endptr)
+{
+  float sign = 1.0f, int_part = 0.0f, frac_part = 0.0f, frac_div = 1.0f;
+  int has_digits = 0;
+
+  while (*s == ' ') s++;                     // 跳过前导空白
+  if (*s == '-') { sign = -1.0f; s++; }
+  else if (*s == '+') s++;
+
+  while (*s >= '0' && *s <= '9') {           // 整数部分
+    int_part = int_part * 10.0f + (float)(*s - '0');
+    has_digits = 1;
+    s++;
+  }
+  if (*s == '.') {                           // 小数部分
+    s++;
+    while (*s >= '0' && *s <= '9') {
+      frac_part = frac_part * 10.0f + (float)(*s - '0');
+      frac_div *= 10.0f;
+      has_digits = 1;
+      s++;
+    }
+  }
+  if (endptr) *endptr = s;
+  return has_digits ? sign * (int_part + frac_part / frac_div) : 0.0f;
+}
+
+// ============================================================
 //  解析串口行数据：格式 "angle_x,angle_y"
 //  angle_x/y 范围 -90 ~ 90
 // ============================================================
 void ParseAngleLine(const char *line)
 {
-  float a1 = 0.0f, a2 = 0.0f;
-  if (sscanf(line, "%f,%f", &a1, &a2) == 2) {
-    angle_x = a1;
-    angle_y = a2;
-    line_ready = 1;
+  const char *p;
+  float a1 = ParseFloat(line, &p);
+  if (*p == ',') {
+    float a2 = ParseFloat(p + 1, &p);
+    // 跳过尾部 \r \n 等空白字符（兼容不同串口终端）
+    while (*p == ' ' || *p == '\r' || *p == '\n') p++;
+    if (*p == '\0') {
+      angle_x = a1;
+      angle_y = a2;
+      line_ready = 1;
+    }
   }
 }
 
