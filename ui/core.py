@@ -362,10 +362,10 @@ class UI:
         # 【终极酷炫·赛博朋克准星】
         # ==========================
         cx, cy = self._ww // 2, self._wh // 2
-        pygame.draw.circle(s, (0, 255, 255), (cx, cy), 24, 3)
-        pygame.draw.circle(s, (255, 0, 180), (cx, cy), 28, 1)
-        pygame.draw.circle(s, (255, 40, 80), (cx, cy), 6, 0)
-        pygame.draw.circle(s, (255,255,255), (cx, cy), 2, 0)
+        # pygame.draw.circle(s, (0, 255, 255), (cx, cy), 24, 3)
+        # pygame.draw.circle(s, (255, 0, 180), (cx, cy), 28, 1)
+        # pygame.draw.circle(s, (255, 40, 80), (cx, cy), 6, 0)
+        # pygame.draw.circle(s, (255,255,255), (cx, cy), 2, 0)
         for angle in [0,90,180,270]:
             x1 = cx + math.cos(math.radians(angle)) * 20
             y1 = cy + math.sin(math.radians(angle)) * 20

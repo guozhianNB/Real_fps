@@ -355,15 +355,7 @@ def main():
     reload_listener = ReloadDoneListener(callback=on_reload_done)
     reload_listener.start()
 
-    # 发射 GAME_START（所有模块就绪）
-    emitter.emit("GAME_START")
-    ml.start()
-
-    # ===================== 2. 主循环 =====================
-
-    print("[状态] 进入主循环（显示由 Pygame UI 独立渲染）")
-    print("  按键:  P=暂停/继续  Esc=退出  R=换弹  Ctrl+C=强制退出")
-
+    
     gun = 'ak'
 
     # FPS 计数器
@@ -433,6 +425,16 @@ def main():
             if face_attempts[tid] >= FACE_MAX_ATTEMPTS:
                 face_registry[tid] = "Unknown"
                 print(f"[人脸] ID#{tid} → Unknown（30 帧未识别，最高置信度 {conf:.1f}）")
+
+    # 发射 GAME_START（所有模块就绪）
+    emitter.emit("GAME_START")
+    ml.start()
+    
+    # ===================== 2. 主循环 =====================
+    
+    print("[状态] 进入主循环（显示由 Pygame UI 独立渲染）")
+    print("  按键:  P=暂停/继续  Esc=退出  R=换弹  Ctrl+C=强制退出")
+    
 
     try:
         bgm.play(loops=-1, fade_ms=2000) # 无限循环 + 2秒淡入

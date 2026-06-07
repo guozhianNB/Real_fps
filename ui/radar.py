@@ -34,7 +34,7 @@ class Radar:
         self.font = get_font_small()
 
         # 距离归一化参考值（depth=100 ≈ 中等距离）
-        self.max_depth_ref = 120.0
+        self.max_depth_ref = 350.0
 
     def render(self, surface, targets, dt_ms=16):
         """绘制 B-scope 雷达。
