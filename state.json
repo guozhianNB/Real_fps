@@ -1,24 +1,24 @@
 {
-  "timestamp": 1780829439.085838,
+  "timestamp": 1780893347.1825504,
   "system_state": {
-    "mode": "over",
+    "mode": "playing",
     "msg": "normal"
   },
   "score": {
-    "value": 0
+    "value": 100
   },
   "targets": [
     {
-      "id": 1,
+      "id": 18,
       "bbox": [
-        112,
-        37,
-        390,
-        439
+        600,
+        361,
+        786,
+        667
       ],
-      "cx": 251,
-      "cy": 238,
-      "depth": 410.9,
+      "cx": 693,
+      "cy": 514,
+      "depth": 205.4,
       "dead": false,
       "locked": false
     }

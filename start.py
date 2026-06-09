@@ -67,6 +67,16 @@ def launch():
 
     if mode == "register":
         subprocess.run([sys.executable, "register.py"])
+    elif mode == "calibrate":
+        print("[启动] 云台校准模式...")
+        from A_serial import SerialController
+        try:
+            ser = SerialController()
+            ser.calibrate()
+            ser.close()
+        except RuntimeError as e:
+            print(f"[错误] 串口初始化失败: {e}")
+            input("按 Enter 退出...")
     else:
         ui_process = None
         if _launch_ui.get():
@@ -120,6 +130,8 @@ mode_frame.pack()
 tk.Radiobutton(mode_frame, text="🎮 游戏模式", variable=_mode, value="game",
                font=("Arial", 12), command=_on_mode_change).pack(anchor="w", pady=3)
 tk.Radiobutton(mode_frame, text="📷 人脸注册", variable=_mode, value="register",
+               font=("Arial", 12), command=_on_mode_change).pack(anchor="w", pady=3)
+tk.Radiobutton(mode_frame, text="🔧 云台校准", variable=_mode, value="calibrate",
                font=("Arial", 12), command=_on_mode_change).pack(anchor="w", pady=3)
 
 # ====== 摄像头选择 ======

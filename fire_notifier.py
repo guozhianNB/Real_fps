@@ -65,8 +65,8 @@ def send_fire(hit_zone="", score_delta=0, event_type="fire", gun="ak"):
     sock = _get_sock()
     try:
         sock.sendto(msg.encode(), FIRE_ADDR)
-    except Exception:
-        pass  # UDP 发失败无影响，UI 收不到下一帧也会知道
+    except Exception as e:
+        print(f"[fire] UDP 发送失败: {e}")
 
 def send_kill(hit_zone="", score_delta=0, target_id=0, target_name="", gun="ak"):
     """发送击杀事件。"""
@@ -81,8 +81,8 @@ def send_kill(hit_zone="", score_delta=0, target_id=0, target_name="", gun="ak")
     })
     try:
         _get_sock().sendto(msg.encode(), FIRE_ADDR)
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"[fire] UDP kill 发送失败: {e}")
 
 def close_sender():
     """关闭发送端 socket。"""
@@ -90,8 +90,8 @@ def close_sender():
     if _fire_sock:
         try:
             _fire_sock.close()
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"[fire] 关闭 socket 失败: {e}")
         _fire_sock = None
 
 
@@ -150,8 +150,10 @@ class FireListener:
                     self.callback(event)
             except socket.timeout:
                 continue
-            except (json.JSONDecodeError, Exception):
-                pass  # 忽略异常包
+            except json.JSONDecodeError:
+                pass  # 格式异常包直接忽略
+            except Exception as e:
+                print(f"[fire] 监听异常: {e}")
 
         sock.close()
 
@@ -173,14 +175,16 @@ def send_reload_done():
     msg = json.dumps({"event": "reload_done", "timestamp": time.time()})
     try:
         _get_reload_sock().sendto(msg.encode(), RELOAD_DONE_ADDR)
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"[fire] reload_done 发送失败: {e}")
 
 def close_reload_sender():
     global _reload_sock
     if _reload_sock:
-        try: _reload_sock.close()
-        except: pass
+        try:
+            _reload_sock.close()
+        except Exception as e:
+            print(f"[fire] 关闭 reload socket 失败: {e}")
         _reload_sock = None
 
 
@@ -221,8 +225,8 @@ class ReloadDoneListener:
                     self.callback(event)
             except socket.timeout:
                 continue
-            except Exception:
-                pass
+            except Exception as e:
+                print(f"[fire] ReloadDoneListener 异常: {e}")
         sock.close()
 
 

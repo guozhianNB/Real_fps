@@ -56,7 +56,9 @@ class CameraManager:
         # ---- 快门/曝光设置 ----
         # CAP_PROP_AUTO_EXPOSURE: 0.25=手动  0.75=自动
         # CAP_PROP_EXPOSURE: 负值=快门时间，越小越快（-6=1/64s，-7=1/128s，-8=1/256s）
-        exposure_str = os.environ.get("CAMERA_EXPOSURE", "-6")
+        exposure_raw = os.environ.get("CAMERA_EXPOSURE", "-6")
+        # 提取前导数字（兼容 "-6 (1/64s)  推荐" 这种含说明的格式）
+        exposure_str = exposure_raw.split()[0].split("(")[0].strip()
         try:
             exposure_val = float(exposure_str)
             # 先关自动曝光，再设手动值
@@ -67,7 +69,7 @@ class CameraManager:
             else:
                 print("注意: 该摄像头不支持手动曝光控制，使用默认自动曝光")
         except ValueError:
-            print(f"警告: CAMERA_EXPOSURE '{exposure_str}' 不是有效数值，跳过曝光设置")
+            print(f"警告: CAMERA_EXPOSURE '{exposure_raw}' 无法解析为数值，跳过曝光设置")
 
         # 丢弃前 10 帧，清空驱动内部缓冲区（解决 Windows 缓冲旧帧问题）
         for _ in range(10):
@@ -85,6 +87,15 @@ class CameraManager:
         self._frame_counter = 0       # 自增帧计数器
 
         self.running = True
+        # 保存曝光值用于定期重检（某些摄像头会回弹）
+        raw = os.environ.get("CAMERA_EXPOSURE", "-6")
+        try:
+            self._exposure_val = float(raw.split()[0].split("(")[0].strip())
+        except ValueError:
+            self._exposure_val = -6.0
+        self._last_exposure_check = time.time()
+        self._exposure_check_interval = 5.0  # 每 5 秒检查一次曝光
+
         self.thread = threading.Thread(target=self._capture_loop, daemon=True)
         self.thread.start()
 
@@ -110,6 +121,15 @@ class CameraManager:
     def _capture_loop(self):
         """后台线程：持续读取摄像头，同时生成缩略图并预编码 JPEG。"""
         while self.running:
+            # 定期重设曝光（防止某些摄像头自动回弹到自动曝光）
+            now = time.time()
+            if now - self._last_exposure_check >= self._exposure_check_interval:
+                self._last_exposure_check = now
+                try:
+                    self.cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 0.25)
+                    self.cap.set(cv2.CAP_PROP_EXPOSURE, self._exposure_val)
+                except Exception as e:
+                    print(f"[摄像头] 定期重设曝光失败: {e}")
             ret, frame = self.cap.read()
             if ret:
                 self._frame_counter += 1

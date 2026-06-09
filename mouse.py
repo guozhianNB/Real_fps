@@ -73,6 +73,10 @@ class MouseListener:
         self._left_pressed = False       # 左键当前是否按下
         self._center_event = threading.Event()
 
+        # ---- 回中节流（避免过频调用 SetCursorPos）----
+        self._last_center_time = 0
+        self._center_interval = 0.05  # 最小回中间隔 50ms
+
         # ---- 平滑滤波器 ----
         if smooth_window > 1:
             self._filter_x = deque(maxlen=smooth_window)
@@ -255,9 +259,14 @@ class MouseListener:
         self._centering = False
 
     def _keep_centered(self):
-        """持续回中检查。"""
+        """持续回中检查（带节流，最低 50ms 间隔）。"""
         if not self.center_lock or not self._game_active:
             return
+
+        now = time.time()
+        if now - self._last_center_time < self._center_interval:
+            return
+        self._last_center_time = now
 
         class POINT(ctypes.Structure):
             _fields_ = [("x", ctypes.c_long), ("y", ctypes.c_long)]

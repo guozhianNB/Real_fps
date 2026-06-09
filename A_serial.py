@@ -15,7 +15,7 @@ A_serial.py — 串口通信模块
 串口协议：
   发送: "yaw,pitch\\n"
         yaw   = 水平角度 (-90 ~ 90)，正=右，负=左
-        pitch = 俯仰角度 (-90 ~ 90)，正=下，负=上
+        pitch = 俯仰角度 (-60 ~ 60)，正=下，负=上（软件限幅）
         末尾必须加换行符 \\n
 
   例如云台控制：
@@ -182,6 +182,31 @@ class SerialController:
                 return p.device
         # 没找到已知设备，返回第一个可用串口
         return ports[0].device if ports else None
+
+    def calibrate(self):
+        """云台校准：缓慢遍历全范围，观察机械是否正常。
+
+        依次执行：
+          1. Yaw 轴从 -90° 到 +90° 扫描
+          2. Pitch 轴从 -90° 到 +90° 扫描
+          3. 回到原点 (0, 0)
+        """
+        if not self.connected:
+            print("[校准] 串口未连接，跳过校准")
+            return
+        print("[校准] 开始——请观察云台运动是否顺畅")
+        print("[校准] Yaw 轴扫描中...")
+        for angle in range(-90, 91, 5):
+            self.send_angles(angle, 0)
+            time.sleep(0.15)
+        print("[校准] Pitch 轴扫描中...")
+        for angle in range(-60, 61, 5):
+            self.send_angles(0, angle)
+            time.sleep(0.15)
+        print("[校准] 回到原点...")
+        self.send_angles(0, 0)
+        time.sleep(0.5)
+        print("[校准] 完成")
 
 
 # ============================================================

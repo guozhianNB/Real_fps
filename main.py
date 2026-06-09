@@ -48,14 +48,20 @@ UI 显示由 ui/core.py（Pygame）独立进程完成，本程序仅负责后端
 
 import json
 import math
+import os
 import time
 import sys
 from pathlib import Path
 import numpy as np
 import cv2
 import pyee
-from sympy import true
 from vision.vision import HumanTracker, get_camera_size
+from vision.keypoints import (
+    NOSE, LEFT_EYE, RIGHT_EYE, LEFT_EAR, RIGHT_EAR,
+    LEFT_SHOULDER, RIGHT_SHOULDER, LEFT_ELBOW, RIGHT_ELBOW,
+    LEFT_WRIST, RIGHT_WRIST, LEFT_HIP, RIGHT_HIP,
+    LEFT_KNEE, RIGHT_KNEE, LEFT_ANKLE, RIGHT_ANKLE,
+)
 from fire_notifier import send_fire, send_kill, close_sender, ReloadDoneListener, close_reload_sender
 from A_serial import SerialController
 from mouse import MouseListener
@@ -100,28 +106,8 @@ MODE_PAUSED = "paused"
 MODE_OVER = "over"
 
 
-# ---------- 人体关键点索引（COCO 格式）----------
-NOSE = 0
-LEFT_EYE = 1
-RIGHT_EYE = 2
-LEFT_EAR = 3
-RIGHT_EAR = 4
-LEFT_SHOULDER = 5
-RIGHT_SHOULDER = 6
-LEFT_ELBOW = 7
-RIGHT_ELBOW = 8
-LEFT_WRIST = 9
-RIGHT_WRIST = 10
-LEFT_HIP = 11
-RIGHT_HIP = 12
-LEFT_KNEE = 13
-RIGHT_KNEE = 14
-LEFT_ANKLE = 15
-RIGHT_ANKLE = 16
-
-
 # ============================================================
-#  state.json 写入工具
+#  state.json 写入工具（原子写入，防读半截）
 # ============================================================
 # state.json 只传递"状态"（模式、目标列表、串口状态）
 # "事件"（开火）走独立的 UDP 广播，实时通知 UI
@@ -142,9 +128,13 @@ def write_state(system_state, score_value=0,
         "show_boxes": show_boxes,
         "target_lost_at": target_lost_at,
     }
+    tmp = STATE_FILE + ".tmp"
     try:
-        with open(STATE_FILE, "w", encoding="utf-8") as f:
+        with open(tmp, "w", encoding="utf-8") as f:
             json.dump(state, f, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, STATE_FILE)
     except Exception as e:
         print(f"[警告] 写入 state.json 失败: {e}")
 
@@ -235,6 +225,8 @@ def main():
     v_x = 0  # 云台 yaw 角目标 (-90~90)
     v_y = 0  # 云台 pitch 角目标 (-90~90)
     autoaim = AutoAimPID()  # PID 自瞄控制器
+    _recoil_y = 0.0         # 后坐力累积（平滑衰减）
+    RECOIL_DECAY = 0.92     # 后坐力每帧衰减系数
 
     # C 模式：初始定位到 -90°，开启自动搜索
     if GMode == "C":
@@ -472,7 +464,7 @@ def main():
             fire_trigger = left_pressed or (AUTO_FIRE and on_target)
             if not reloading and (ammo or INFINITE_AMMO) and fire_trigger and (now_ms - last_hit_time) >= FIRE_COOLDOWN_MS:
                 last_hit_time = now_ms
-                v_y -= 2.0
+                _recoil_y -= 2.0  # 累积后坐力，而非阶跃跳变
                 ammo -= 1
                 if on_target:
                     if len(alive_head) > 0:
@@ -613,6 +605,10 @@ def main():
                 else:
                     v_x += dx * YAW
                     v_y += dy * PITCH
+                # 平滑后坐力：每帧衰减，持续影响准心
+                _recoil_y *= RECOIL_DECAY
+                v_y += _recoil_y
+
                 v_x = max(-90, min(90, v_x))
                 v_y = max(-60, min(60, v_y))
                 if serial and serial.connected:

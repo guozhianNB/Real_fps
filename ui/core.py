@@ -61,8 +61,10 @@ class UI:
                 try:
                     with open(STATUS_FILE, "r", encoding="utf-8") as f:
                         self.event_q.put(("json", f.read()))
-                except:
-                    pass
+                except FileNotFoundError:
+                    pass  # state.json 还没生成
+                except Exception as e:
+                    print(f"[UI] 读取 state.json 异常: {e}")
                 time.sleep(0.05)
         threading.Thread(target=loop, daemon=True).start()
 
@@ -83,7 +85,7 @@ class UI:
                             rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                             self.event_q.put(("camera", rgb))
                 except Exception:
-                    pass  # 失败立刻重试，不 sleep
+                    pass  # 网络/摄像头暂时不可用，下次重试
 
         t = threading.Thread(target=loop, daemon=True)
         t.start()
@@ -118,8 +120,8 @@ class UI:
             screen.blit(sub, (w//2-sub.get_width()//2,120))
             pygame.display.flip()
             pygame.event.pump()
-        except:
-            pass
+        except Exception as e:
+            print(f"[UI] 加载画面显示异常: {e}")
 
     def start(self):
         pygame.init()
@@ -213,6 +215,8 @@ class UI:
         self.effects = Effects()
         from music.sfx import SFXPlayer
         self.sfx = SFXPlayer()
+        self._bgm_volume = 0.5  # BGM 音量 0~1
+        self._sfx_volume = 0.7  # SFX 音量
 
         self._start_json_reader()
         self._start_camera_reader()
@@ -255,6 +259,15 @@ class UI:
                     self.kill_feed.add_kill(e.__dict__.get("hit_zone",""),e.__dict__.get("score_delta",0),e.__dict__.get("target_id",0),e.__dict__.get("target_name",""))
                     if self.sfx:
                         self.sfx.play_fire(e.__dict__.get("gun","ak"))
+                elif e.type == pygame.KEYDOWN:
+                    if e.key == pygame.K_UP:
+                        self._bgm_volume = min(1.0, self._bgm_volume + 0.1)
+                        print(f"[音量] BGM: {self._bgm_volume:.1f}")
+                        pygame.mixer.music.set_volume(self._bgm_volume)
+                    elif e.key == pygame.K_DOWN:
+                        self._bgm_volume = max(0.0, self._bgm_volume - 0.1)
+                        print(f"[音量] BGM: {self._bgm_volume:.1f}")
+                        pygame.mixer.music.set_volume(self._bgm_volume)
 
             try:
                 while True:
@@ -262,8 +275,8 @@ class UI:
                     if t=="json" and v.strip():
                         try:
                             self.latest_state=json.loads(v)
-                        except:
-                            pass
+                        except json.JSONDecodeError:
+                            pass  # 半截 JSON 直接跳过
                     elif t=="camera":
                         self.latest_frame=v
             except queue.Empty:
@@ -387,14 +400,67 @@ class UI:
                     bg.fill((0,30,10,160))
                     s.blit(bg,bg_rect)
                     s.blit(warn,wr)
-                except:
-                    pass
+                except Exception as e:
+                    print(f"[UI] TARGET LOST 渲染异常: {e}")
 
-        targets=st.get("targets",[])
+        # ==========================
+        #  游戏状态覆盖层（暂停/结束）
+        # ==========================
+        mode = st.get("system_state", {}).get("mode", "")
+        if mode == "paused":
+            # 半透明遮罩
+            overlay = pygame.Surface((self._ww, self._wh), pygame.SRCALPHA)
+            overlay.fill((0, 0, 0, 160))
+            s.blit(overlay, (0, 0))
+            try:
+                from ui.assets import get_font_large
+                font = get_font_large()
+                txt = font.render("— PAUSED —", True, (0, 220, 255))
+                tr = txt.get_rect(center=(self._ww // 2, self._wh // 2))
+                s.blit(txt, tr)
+                font2 = pygame.font.Font(None, 32)
+                hint = font2.render("按 P 继续", True, (150, 200, 255))
+                hr = hint.get_rect(center=(self._ww // 2, self._wh // 2 + 50))
+                s.blit(hint, hr)
+            except Exception:
+                pass
+        elif mode == "over":
+            overlay = pygame.Surface((self._ww, self._wh), pygame.SRCALPHA)
+            overlay.fill((0, 0, 0, 200))
+            s.blit(overlay, (0, 0))
+            try:
+                from ui.assets import get_font_large
+                font = get_font_large()
+                txt = font.render("GAME OVER", True, (255, 60, 80))
+                tr = txt.get_rect(center=(self._ww // 2, self._wh // 2 - 30))
+                s.blit(txt, tr)
+                score_val = st.get("score", {}).get("value", 0)
+                font2 = pygame.font.Font(None, 48)
+                score_txt = font2.render(f"最终得分: {score_val}", True, (255, 200, 0))
+                sr = score_txt.get_rect(center=(self._ww // 2, self._wh // 2 + 30))
+                s.blit(score_txt, sr)
+            except Exception:
+                pass
+
+        # ==========================
+        #  音量指示（右下角，仅变化时闪烁）
+        # ==========================
+        try:
+            vol_surf = pygame.font.Font(None, 28).render(
+                f"音量 {int(self._bgm_volume * 100)}%", True, (100, 200, 255))
+            vr = vol_surf.get_rect(bottomright=(self._ww - 20, self._wh - 20))
+            vol_bg = pygame.Surface((vol_surf.get_width() + 12, vol_surf.get_height() + 6), pygame.SRCALPHA)
+            vol_bg.fill((0, 0, 0, 100))
+            s.blit(vol_bg, (vr.x - 6, vr.y - 3))
+            s.blit(vol_surf, vr)
+        except Exception:
+            pass
+
+        targets = st.get("targets", [])
         if self.radar:
-            self.radar.render(s,targets,16)
+            self.radar.render(s, targets, 16)
         if self.hud:
-            self.hud.render(s,st,int(self.clock.get_fps()),16)
+            self.hud.render(s, st, int(self.clock.get_fps()), 16)
         if self.effects:
             self.effects.render(s)
 
