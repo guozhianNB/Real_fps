@@ -1,6 +1,7 @@
 # ui/core.py — Real FPS 主 UI 模块（终极华丽酷炫版）
 import pygame
 import json
+import os
 import threading
 import queue
 import time
@@ -14,6 +15,7 @@ from ui.hud import HUD
 from ui.effects import Effects
 from ui.gun_view import GunView
 from ui.kill_feed import KillFeed
+from ui.assets import get_font, get_font_large, get_font_medium
 from fire_notifier import send_reload_done
 
 STATUS_FILE = "state.json"
@@ -54,6 +56,26 @@ class UI:
         self.gun_reload_frames = []
         self.kill_feed = KillFeed()
         self.sfx = None
+        self._vignette_surf = None  # 暗角缓存，懒初始化
+        self._crosshair_pulse = 0.0  # 准星开火脉冲 0~1
+
+    def _get_vignette(self, w, h):
+        """生成暗角渐变 Surface（径向渐变，中心透明边缘黑）。"""
+        if self._vignette_surf is not None and self._vignette_surf.get_size() == (w, h):
+            return self._vignette_surf
+        surf = pygame.Surface((w, h), pygame.SRCALPHA)
+        cx, cy = w // 2, h // 2
+        max_dist = math.sqrt(cx**2 + cy**2)
+        for y in range(h):
+            for x in range(w):
+                dx, dy = x - cx, y - cy
+                dist = math.sqrt(dx*dx + dy*dy) / max_dist  # 0~1
+                # 中心完全透明，边缘 alpha 逐渐加深
+                alpha = int(pow(dist, 2.5) * 180)
+                if alpha > 0:
+                    surf.set_at((x, y), (0, 0, 0, min(255, alpha)))
+        self._vignette_surf = surf
+        return surf
 
     def _start_json_reader(self):
         def loop():
@@ -112,8 +134,8 @@ class UI:
             pygame.display.set_mode((w, h))
             screen = pygame.display.get_surface()
             screen.fill((0,0,0))
-            font = pygame.font.Font(None,48)
-            font_sub = pygame.font.Font(None,24)
+            font = get_font(48)
+            font_sub = get_font(24)
             text = font.render("加载中...", True, (0,255,100))
             sub = font_sub.render("UI 已升级：赛博朋克华丽版", True, (100,255,150))
             screen.blit(text, (w//2-text.get_width()//2,60))
@@ -242,6 +264,7 @@ class UI:
                         self.sfx.play_fire(e.__dict__.get("gun","ak"))
                     if self.effects:
                         self.effects.add_hit_flash(e.__dict__.get("hit_zone",""),e.__dict__.get("score_delta",0))
+                    self._crosshair_pulse = 1.0  # 准星脉冲触发
                 elif e.type==INSPECT_EVENT:
                     if self._inspect_phase==0:
                         self._inspect_phase=1
@@ -256,9 +279,29 @@ class UI:
                             self.sfx.play_reload_part(self._reload_gun,"clipout")
                             self._reload_sound_played.add("clipout")
                 elif e.type==KILL_EVENT:
-                    self.kill_feed.add_kill(e.__dict__.get("hit_zone",""),e.__dict__.get("score_delta",0),e.__dict__.get("target_id",0),e.__dict__.get("target_name",""))
+                    hit_zone = e.__dict__.get("hit_zone","")
+                    target_id = e.__dict__.get("target_id",0)
+                    self.kill_feed.add_kill(hit_zone, e.__dict__.get("score_delta",0), target_id, e.__dict__.get("target_name",""))
+                    # 击杀粒子：从 targets 中查该目标的屏幕坐标
+                    if self.effects:
+                        cs = self.latest_state.get("camera_size")
+                        sx = self._ww / cs[0] if cs and len(cs)==2 and cs[0]>0 else 1.0
+                        sy = self._wh / cs[1] if cs and len(cs)==2 and cs[1]>0 else 1.0
+                        for t in self.latest_state.get("targets", []):
+                            if t.get("id") == target_id:
+                                b = t.get("bbox")
+                                if b and len(b) == 4:
+                                    cx = (b[0] + b[2]) // 2
+                                    cy = (b[1] + b[3]) // 2
+                                    px, py = int(cx * sx), int(cy * sy)
+                                    self.effects.add_kill_effect(px, py, hit_zone)
+                                break
+                    # 击杀音效
                     if self.sfx:
-                        self.sfx.play_fire(e.__dict__.get("gun","ak"))
+                        sound_path = os.path.join(
+                            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                            "music", "sounds", "head_shot.mp3")
+                        self.sfx.play(sound_path)
                 elif e.type == pygame.KEYDOWN:
                     if e.key == pygame.K_UP:
                         self._bgm_volume = min(1.0, self._bgm_volume + 0.1)
@@ -329,6 +372,8 @@ class UI:
                     send_reload_done()
 
             self.kill_feed.update(dt_ms)
+            # 准星脉冲衰减
+            self._crosshair_pulse = max(0.0, self._crosshair_pulse - dt_ms / 150.0)
             self._render(dt_ms)
             pygame.display.flip()
             self.clock.tick(FPS_TARGET)
@@ -361,15 +406,48 @@ class UI:
             if not b or len(b)!=4:
                 continue
             x1,y1,x2,y2=int(b[0]*sx),int(b[1]*sy),int(b[2]*sx),int(b[3]*sy)
+            w,h=x2-x1,y2-y1
             if t.get("dead"):
-                w,h=x2-x1,y2-y1
                 over=pygame.Surface((w,h),pygame.SRCALPHA)
                 pygame.draw.line(over,(255,60,80,160),(0,0),(w,h),3)
                 pygame.draw.line(over,(255,60,80,160),(w,0),(0,h),3)
                 s.blit(over,(x1,y1))
             elif st.get("show_boxes",True):
-                color=(255,60,80) if t.get("locked") else (80,255,120)
-                pygame.draw.rect(s,color,(x1,y1,x2-x1,y2-y1),2)
+                locked = t.get("locked", False)
+                color = (255,60,80) if locked else (0,255,100)
+                corner_len = max(6, min(16, w // 6, h // 6))
+                # 四角 bracket
+                pts = [
+                    (x1, y1, x1+corner_len, y1, x1, y1+corner_len),  # 左上
+                    (x2, y1, x2-corner_len, y1, x2, y1+corner_len),  # 右上
+                    (x1, y2, x1+corner_len, y2, x1, y2-corner_len),  # 左下
+                    (x2, y2, x2-corner_len, y2, x2, y2-corner_len),  # 右下
+                ]
+                for ax, ay, bx, by, cx, cy in pts:
+                    pygame.draw.line(s, color, (ax, ay), (bx, by), 2)
+                    pygame.draw.line(s, color, (ax, ay), (cx, cy), 2)
+                # 人名标签（框顶上方）
+                name = t.get("name", "")
+                if name and name != "Unknown":
+                    try:
+                        name_font = get_font(24)
+                        name_surf = name_font.render(name, True, color)
+                        # 标签背景
+                        nw, nh = name_surf.get_size()
+                        label_bg = pygame.Surface((nw+8, nh+4), pygame.SRCALPHA)
+                        label_bg.fill((0,0,0,140))
+                        s.blit(label_bg, (x1-4, y1-nh-8))
+                        s.blit(name_surf, (x1, y1-nh-6))
+                    except Exception:
+                        pass
+
+        # ==========================
+        #  镜头暗角（径向渐变，中心亮边缘暗）
+        # ==========================
+        try:
+            s.blit(self._get_vignette(self._ww, self._wh), (0, 0))
+        except Exception:
+            pass
 
         # ==========================
         # 【终极酷炫·赛博朋克准星】
@@ -379,11 +457,15 @@ class UI:
         # pygame.draw.circle(s, (255, 0, 180), (cx, cy), 28, 1)
         # pygame.draw.circle(s, (255, 40, 80), (cx, cy), 6, 0)
         # pygame.draw.circle(s, (255,255,255), (cx, cy), 2, 0)
+        # 准星大小随开火脉冲缩放
+        pulse = self._crosshair_pulse
+        inner_r = 20 + pulse * 10   # 内圈从 20 扩大到 30
+        outer_r = 32 + pulse * 12   # 外圈从 32 扩大到 44
         for angle in [0,90,180,270]:
-            x1 = cx + math.cos(math.radians(angle)) * 20
-            y1 = cy + math.sin(math.radians(angle)) * 20
-            x2 = cx + math.cos(math.radians(angle)) * 32
-            y2 = cy + math.sin(math.radians(angle)) * 32
+            x1 = cx + math.cos(math.radians(angle)) * inner_r
+            y1 = cy + math.sin(math.radians(angle)) * inner_r
+            x2 = cx + math.cos(math.radians(angle)) * outer_r
+            y2 = cy + math.sin(math.radians(angle)) * outer_r
             pygame.draw.line(s, (0,255,220), (x1,y1), (x2,y2), 3)
             pygame.draw.line(s, (255,0,160), (x1,y1), (x2,y2), 1)
 
@@ -391,8 +473,7 @@ class UI:
         if tlost and (time.time()-tlost)<3.0:
             if int(time.time()*3)%2==0:
                 try:
-                    from ui.assets import get_font_medium
-                    fm=get_font_medium()
+                    fm = get_font_medium()
                     warn=fm.render("TARGET LOST",True,(0,255,120))
                     wr=warn.get_rect(center=(cx,cy+60))
                     bg_rect=wr.inflate(30,12)
@@ -413,12 +494,11 @@ class UI:
             overlay.fill((0, 0, 0, 160))
             s.blit(overlay, (0, 0))
             try:
-                from ui.assets import get_font_large
                 font = get_font_large()
                 txt = font.render("— PAUSED —", True, (0, 220, 255))
                 tr = txt.get_rect(center=(self._ww // 2, self._wh // 2))
                 s.blit(txt, tr)
-                font2 = pygame.font.Font(None, 32)
+                font2 = get_font(32)
                 hint = font2.render("按 P 继续", True, (150, 200, 255))
                 hr = hint.get_rect(center=(self._ww // 2, self._wh // 2 + 50))
                 s.blit(hint, hr)
@@ -429,13 +509,12 @@ class UI:
             overlay.fill((0, 0, 0, 200))
             s.blit(overlay, (0, 0))
             try:
-                from ui.assets import get_font_large
                 font = get_font_large()
                 txt = font.render("GAME OVER", True, (255, 60, 80))
                 tr = txt.get_rect(center=(self._ww // 2, self._wh // 2 - 30))
                 s.blit(txt, tr)
                 score_val = st.get("score", {}).get("value", 0)
-                font2 = pygame.font.Font(None, 48)
+                font2 = get_font(48)
                 score_txt = font2.render(f"最终得分: {score_val}", True, (255, 200, 0))
                 sr = score_txt.get_rect(center=(self._ww // 2, self._wh // 2 + 30))
                 s.blit(score_txt, sr)
@@ -446,8 +525,9 @@ class UI:
         #  音量指示（右下角，仅变化时闪烁）
         # ==========================
         try:
-            vol_surf = pygame.font.Font(None, 28).render(
-                f"音量 {int(self._bgm_volume * 100)}%", True, (100, 200, 255))
+            vol_font = get_font(24)
+            vol_surf = vol_font.render(
+                f"BGM {int(self._bgm_volume * 100)}%", True, (100, 200, 255))
             vr = vol_surf.get_rect(bottomright=(self._ww - 20, self._wh - 20))
             vol_bg = pygame.Surface((vol_surf.get_width() + 12, vol_surf.get_height() + 6), pygame.SRCALPHA)
             vol_bg.fill((0, 0, 0, 100))

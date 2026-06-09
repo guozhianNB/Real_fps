@@ -516,6 +516,7 @@ def main():
                     "depth": round(depth, 1),
                     "dead": tid in blacklist,
                     "locked": tid == locked_id,
+                    "name": face_registry.get(tid, ""),
                 })
 
             # ---- 2e. 串口状态 ----

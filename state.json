@@ -1,26 +1,27 @@
 {
-  "timestamp": 1780893347.1825504,
+  "timestamp": 1781031301.9005613,
   "system_state": {
     "mode": "playing",
     "msg": "normal"
   },
   "score": {
-    "value": 100
+    "value": 50
   },
   "targets": [
     {
-      "id": 18,
+      "id": 1,
       "bbox": [
-        600,
-        361,
-        786,
-        667
+        516,
+        295,
+        768,
+        820
       ],
-      "cx": 693,
-      "cy": 514,
-      "depth": 205.4,
-      "dead": false,
-      "locked": false
+      "cx": 642,
+      "cy": 557,
+      "depth": 172.2,
+      "dead": true,
+      "locked": false,
+      "name": ""
     }
   ],
   "camera_size": [
@@ -31,7 +32,7 @@
     "status": "ERROR",
     "msg": "not initialized"
   },
-  "ammo": 30,
+  "ammo": 0,
   "show_boxes": false,
   "target_lost_at": 0.0
 }

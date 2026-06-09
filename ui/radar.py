@@ -11,6 +11,8 @@
 import pygame
 import sys
 import os
+from collections import deque
+import math
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -36,6 +38,9 @@ class Radar:
         # 距离归一化参考值（depth=100 ≈ 中等距离）
         self.max_depth_ref = 350.0
 
+        # 扫描线尾迹（保存最近 10 帧位置）
+        self._scan_trail = deque(maxlen=10)
+
     def render(self, surface, targets, dt_ms=16):
         """绘制 B-scope 雷达。
 
@@ -52,20 +57,48 @@ class Radar:
         bg.fill((0, 0, 0, 140))
         surface.blit(bg, (x, y))
 
-        # ---- 边框 ----
-        pygame.draw.rect(surface, COLOR_GREEN, (x, y, w, h), 2)
+        # ---- 发光边框 ----
+        # 外层光晕（宽 2px 半透明绿，向外扩展 3px）
+        glow_pad = 3
+        pygame.draw.rect(
+            surface, (0, 255, 100, 60),
+            (x - glow_pad, y - glow_pad, w + glow_pad * 2, h + glow_pad * 2),
+            2, border_radius=6,
+        )
+        # 内层亮绿边框（宽 4px）
+        pygame.draw.rect(surface, COLOR_GREEN, (x, y, w, h), 4, border_radius=4)
 
-        # ---- 网格线（方位参考） ----
+        # ---- 左侧距离刻度短线 ----
+        tick_len = 8
+        for i in range(1, 4):
+            ty = y + (h * i) // 4
+            pygame.draw.line(surface, COLOR_GREEN, (x, ty), (x + tick_len, ty), 2)
+
+        # ---- 网格线（方位参考：虚线效果由透明度实现）----
         for i in range(1, 4):
             gx = x + (w * i) // 4
             pygame.draw.line(surface, (0, 180, 60, 80), (gx, y), (gx, y + h), 1)
         # ---- 距离参考线 ----
-        gy = y + h // 3
-        pygame.draw.line(surface, (0, 180, 60, 80), (x, gy), (x + w, gy), 1)
-        gy = y + (h * 2) // 3
-        pygame.draw.line(surface, (0, 180, 60, 80), (x, gy), (x + w, gy), 1)
+        for i in range(1, 3):
+            gy = y + (h * i) // 3
+            pygame.draw.line(surface, (0, 180, 60, 80), (x, gy), (x + w, gy), 1)
 
-        # ---- 扫描线（左右往复移动） ----
+        # ---- 扫描线尾迹（从旧到新依次变亮）----
+        trail_len = len(self._scan_trail)
+        for idx, old_sx in enumerate(self._scan_trail):
+            progress = (idx + 1) / trail_len if trail_len > 0 else 0
+            trail_alpha = int(80 * progress)  # 最旧≈0，最新≈80
+            if trail_alpha < 8:
+                continue
+            trail_surf = pygame.Surface((2, h), pygame.SRCALPHA)
+            for i in range(h):
+                # 顶部亮、底部暗的渐变 + 尾迹淡出
+                fade = 1.0 - i / h
+                ta = int(trail_alpha * fade)
+                trail_surf.set_at((0, i), (0, 255, 100, max(0, ta)))
+            surface.blit(trail_surf, (old_sx, y))
+
+        # ---- 扫描线（当前帧）----
         self.scan_x += w * (dt_ms / 1000) * 0.6 * self.scan_dir
         if self.scan_x > w:
             self.scan_x = w
@@ -74,7 +107,7 @@ class Radar:
             self.scan_x = 0
             self.scan_dir = 1
         sx = x + self.scan_x
-        # 渐变透明度
+        self._scan_trail.append(sx)
         scan_surf = pygame.Surface((3, h), pygame.SRCALPHA)
         for i in range(h):
             alpha = int(120 * (1 - i / h))
@@ -117,10 +150,7 @@ class Radar:
                 pygame.draw.circle(surface, color, (int(px), int(py)), 5)
                 pygame.draw.circle(surface, color, (int(px), int(py)), 8, 1)
 
-        # ---- 标签 ----
-        label = self.font.render("B-SCOPE", True, COLOR_GREEN)
-        label_y = max(0, y - 20)
-        surface.blit(label, (x + w // 2 - label.get_width() // 2, label_y))
+        # 标签已移除（简洁化）
 
 
 # ====== 独立测试 ======

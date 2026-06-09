@@ -6,11 +6,17 @@ import pygame
 
 # ====== 中文字体（全局生效） ======
 _CN_FONT_PATH = None
-for _p in ["C:/Windows/Fonts/msyh.ttc", "C:/Windows/Fonts/simhei.ttf",
-           "C:/Windows/Fonts/yahei.ttf"]:
-    if os.path.exists(_p):
-        _CN_FONT_PATH = _p
-        break
+_asset_dir = os.path.dirname(os.path.abspath(__file__))
+# 优先使用项目自定义字体
+_custom_font = os.path.join(_asset_dir, "asset", "font.ttf")
+if os.path.exists(_custom_font):
+    _CN_FONT_PATH = _custom_font
+else:
+    for _p in ["C:/Windows/Fonts/msyh.ttc", "C:/Windows/Fonts/simhei.ttf",
+               "C:/Windows/Fonts/yahei.ttf"]:
+        if os.path.exists(_p):
+            _CN_FONT_PATH = _p
+            break
 
 # ====== 字体缓存 ======
 _font_cache = {}

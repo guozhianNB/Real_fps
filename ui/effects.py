@@ -9,6 +9,8 @@
 import pygame
 import sys
 import os
+import random
+import math
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -88,9 +90,80 @@ class ScorePopup(BaseEffect):
         wrapper.set_alpha(alpha)
 
         rect = wrapper.get_rect(
-            center=(surface.get_width() // 2, surface.get_height() // 2 - 50)
+            center=(surface.get_width() // 2, surface.get_height() // 2 - 80)
         )
         surface.blit(wrapper, rect)
+
+
+# ============================================================
+#  粒子系统 — 击杀爆发
+# ============================================================
+
+class Particle:
+    """单个粒子：位置、速度、生命、颜色、大小。"""
+
+    def __init__(self, x, y, vx, vy, color, size=4, life_ms=600):
+        self.x = x
+        self.y = y
+        self.vx = vx
+        self.vy = vy
+        self.color = color
+        self.size = size
+        self.life_ms = life_ms
+        self.elapsed = 0
+
+    def update(self, dt):
+        self.elapsed += dt
+        t = self.elapsed / self.life_ms
+        # 速度衰减 + 轻微重力
+        self.vx *= 0.96
+        self.vy *= 0.96
+        self.vy += 0.05  # 重力
+        self.x += self.vx
+        self.y += self.vy
+        return t < 1.0
+
+    def render(self, surface):
+        t = self.elapsed / self.life_ms
+        if t >= 1.0:
+            return
+        alpha = int(255 * (1 - t))
+        size = max(1, int(self.size * (1 - t * 0.5)))
+        c = (*self.color[:3], max(0, min(255, alpha)))
+        pygame.draw.circle(surface, c, (int(self.x), int(self.y)), size)
+
+
+class ParticleBurst(BaseEffect):
+    """粒子爆发效果：在一点向四周飞散粒子。"""
+
+    def __init__(self, x, y, zone="", count=25):
+        super().__init__(800)  # 800ms 总时长
+        self.particles = []
+        # 颜色：头部=红橙，身体=绿
+        if zone == "head":
+            colors = [(255, 80, 40), (255, 150, 30), (255, 200, 60)]
+        else:
+            colors = [(0, 255, 100), (50, 255, 50), (100, 255, 150)]
+
+        for _ in range(count):
+            angle = random.uniform(0, math.pi * 2)
+            speed = random.uniform(2, 7)
+            vx = math.cos(angle) * speed
+            vy = math.sin(angle) * speed - 2  # 轻微向上偏
+            color = random.choice(colors)
+            size = random.uniform(2, 6)
+            life = random.uniform(400, 800)
+            self.particles.append(Particle(x, y, vx, vy, color, size, life))
+
+    def update(self, dt):
+        if not super().update(dt):
+            return False
+        self.particles = [p for p in self.particles if p.update(dt)]
+        return len(self.particles) > 0
+
+    def render(self, surface):
+        for p in self.particles:
+            p.render(surface)
 
 
 class Effects:
@@ -100,15 +173,25 @@ class Effects:
         self.active_effects = []
 
     def add_hit_flash(self, zone="", delta=0):
-        """添加命中反馈（得分弹出，无闪白）。
+        """添加命中反馈（全屏闪白 + 得分弹出）。
 
         参数：
             zone:  "head" / "body" / ""
             delta: 得分值
         """
         if delta > 0:
+            self.active_effects.append(HitFlash())
             reason = "headshot" if zone == "head" else "hit"
             self.active_effects.append(ScorePopup(delta, reason))
+
+    def add_kill_effect(self, x, y, zone=""):
+        """在指定屏幕位置生成击杀粒子爆发。
+
+        参数：
+            x, y:  目标在屏幕上的像素坐标
+            zone:  "head"=红色粒子  "body"=绿色粒子
+        """
+        self.active_effects.append(ParticleBurst(x, y, zone))
 
     def update(self, dt):
         """更新所有动画，移除已完成的。"""
