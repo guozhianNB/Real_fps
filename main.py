@@ -224,7 +224,7 @@ def main():
     serial = init_serial(SERIAL_PORT, SERIAL_BAUDRATE)
     v_x = 0  # 云台 yaw 角目标 (-90~90)
     v_y = 0  # 云台 pitch 角目标 (-90~90)
-    autoaim = AutoAimPID()  # PID 自瞄控制器
+    autoaim = AutoAimPID(move_speed=1.5)  # PID 自瞄控制器（°/轮）
     _recoil_y = 0.0         # 后坐力累积（平滑衰减）
     RECOIL_DECAY = 0.92     # 后坐力每帧衰减系数
 
@@ -583,6 +583,15 @@ def main():
                         )
                         v_x += dx_a
                         v_y += dy_a
+
+                        # 舵机限位判定：autoaim 仍想往极限方向转但已到限位
+                        # → 判定目标不可达，自动放弃（不算击杀得分）
+                        YAW_LIMIT = 90
+                        if (v_x > YAW_LIMIT and dx_a > 0) or (v_x < -YAW_LIMIT and dx_a < 0):
+                            print(f"[限位] 目标 #{locked_id} 超出舵机范围，自动放弃")
+                            blacklist.add(locked_id)
+                            locked_id = None
+                            autoaim.reset()
                     else:
                         # 目标丢失 → 自动重新锁定最近的可用目标
                         if locked_id is not None:

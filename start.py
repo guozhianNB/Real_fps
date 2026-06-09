@@ -174,7 +174,7 @@ _game_frame.pack(pady=(10, 5))
 tk.Label(_game_frame, text="游戏方案：", font=("Arial", 10, "bold")).pack(anchor="w")
 opt_frame = tk.Frame(_game_frame)
 opt_frame.pack()
-for opt_text, opt_val in [("方案 A", "A"), ("方案 B", "B"), ("方案 C", "C")]:
+for opt_text, opt_val in [("正常模式", "A"), ("donk模式", "B"), ("大哥模式", "C")]:
     tk.Radiobutton(opt_frame, text=opt_text, variable=_game_opt, value=opt_val,
                    font=("Arial", 10)).pack(side=tk.LEFT, padx=8)
 
