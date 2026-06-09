@@ -338,13 +338,19 @@ def main():
                 print(f"[锁定] 目标 #{best_id}")
     ml.emitter.on("GAME_LOCK", on_lock)
 
-    # 监听 UI 换弹完成信号
-    def on_reload_done(event):
+    # 监听 UI 信号（换弹完成 + 音量调节）
+    def on_ui_event(event):
         nonlocal reloading, ammo
-        reloading = False
-        ammo = 30
-        print(f"[换弹] 完成，弹药: {ammo}")
-    reload_listener = ReloadDoneListener(callback=on_reload_done)
+        ev_type = event.get("event", "")
+        if ev_type == "reload_done":
+            reloading = False
+            ammo = 30
+            print(f"[换弹] 完成，弹药: {ammo}")
+        elif ev_type == "volume":
+            vol = event.get("volume", 0.5)
+            bgm.set_volume(vol)
+            print(f"[音量] BGM: {vol:.1f}")
+    reload_listener = ReloadDoneListener(callback=on_ui_event)
     reload_listener.start()
 
     

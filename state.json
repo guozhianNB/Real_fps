@@ -1,1 +1,38 @@
-{"system_state": {"mode": "playing", "msg": "\u547d\u4e2d\uff01"}, "score": {"value": 50}, "targets": [{"id": 1, "bbox": [600, 320, 680, 400]}], "serial": {"status": "OK"}, "timestamp": 1781042175.8032286}
+{
+  "timestamp": 1781046436.4517002,
+  "system_state": {
+    "mode": "playing",
+    "msg": "normal"
+  },
+  "score": {
+    "value": 50
+  },
+  "targets": [
+    {
+      "id": 1,
+      "bbox": [
+        822,
+        42,
+        966,
+        255
+      ],
+      "cx": 894,
+      "cy": 148,
+      "depth": 296.8,
+      "dead": true,
+      "locked": false,
+      "name": ""
+    }
+  ],
+  "camera_size": [
+    1280,
+    720
+  ],
+  "serial": {
+    "status": "ERROR",
+    "msg": "not initialized"
+  },
+  "ammo": 26,
+  "show_boxes": false,
+  "target_lost_at": 0.0
+}

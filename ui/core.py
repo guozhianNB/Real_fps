@@ -306,11 +306,13 @@ class UI:
                     if e.key == pygame.K_UP:
                         self._bgm_volume = min(1.0, self._bgm_volume + 0.1)
                         print(f"[音量] BGM: {self._bgm_volume:.1f}")
-                        pygame.mixer.music.set_volume(self._bgm_volume)
+                        from fire_notifier import send_volume
+                        send_volume(self._bgm_volume)
                     elif e.key == pygame.K_DOWN:
                         self._bgm_volume = max(0.0, self._bgm_volume - 0.1)
                         print(f"[音量] BGM: {self._bgm_volume:.1f}")
-                        pygame.mixer.music.set_volume(self._bgm_volume)
+                        from fire_notifier import send_volume
+                        send_volume(self._bgm_volume)
 
             try:
                 while True:

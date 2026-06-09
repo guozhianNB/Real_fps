@@ -178,6 +178,15 @@ def send_reload_done():
     except Exception as e:
         print(f"[fire] reload_done 发送失败: {e}")
 
+def send_volume(volume):
+    """UI 通知主进程：调整 BGM 音量。"""
+    msg = json.dumps({"event": "volume", "volume": volume, "timestamp": time.time()})
+    try:
+        _get_reload_sock().sendto(msg.encode(), RELOAD_DONE_ADDR)
+    except Exception as e:
+        print(f"[fire] volume 发送失败: {e}")
+
+
 def close_reload_sender():
     global _reload_sock
     if _reload_sock:
