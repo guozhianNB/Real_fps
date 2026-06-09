@@ -24,11 +24,62 @@ import threading
 import queue
 import time
 import ctypes
+import ctypes.wintypes
 from collections import deque
 
 from pynput.mouse import Listener as MouseListener_pynput, Button
 from pynput.keyboard import Listener as KeyboardListener_pynput, Key
 from pyee import EventEmitter
+
+
+# ---- 全局：空白光标相关 ----
+class ICONINFO(ctypes.Structure):
+    _fields_ = [
+        ("fIcon",    ctypes.c_bool),
+        ("xHotspot", ctypes.c_uint32),
+        ("yHotspot", ctypes.c_uint32),
+        ("hbmMask",  ctypes.c_void_p),
+        ("hbmColor", ctypes.c_void_p),
+    ]
+
+_BLANK_CURSOR = None
+_BLANK_BITMAP = None
+_CURSOR_HIDDEN = False
+
+def _make_blank_cursor():
+    """创建全透明空白光标（全局共享）。"""
+    global _BLANK_CURSOR, _BLANK_BITMAP
+    if _BLANK_CURSOR is not None:
+        return True
+    _BLANK_BITMAP = ctypes.windll.gdi32.CreateBitmap(1, 1, 1, 1, None)
+    if not _BLANK_BITMAP:
+        return False
+    info = ICONINFO(False, 0, 0, _BLANK_BITMAP, _BLANK_BITMAP)
+    _BLANK_CURSOR = ctypes.windll.user32.CreateIconIndirect(ctypes.byref(info))
+    return _BLANK_CURSOR is not None
+
+def hide_system_cursor():
+    """隐藏鼠标指针。"""
+    global _CURSOR_HIDDEN
+    _make_blank_cursor()
+    # ShowCursor 计数器减到负
+    while ctypes.windll.user32.ShowCursor(False) >= 0:
+        pass
+    # 替换系统箭头
+    if _BLANK_CURSOR:
+        ctypes.windll.user32.SetSystemCursor(_BLANK_CURSOR, 32512)  # OCR_NORMAL
+    _CURSOR_HIDDEN = True
+
+def show_system_cursor():
+    """恢复鼠标指针。"""
+    global _CURSOR_HIDDEN
+    if not _CURSOR_HIDDEN:
+        return
+    # 恢复系统默认光标
+    ctypes.windll.user32.SystemParametersInfoW(0x0057, 0, None, 0)  # SPI_SETCURSORS
+    while ctypes.windll.user32.ShowCursor(True) < 0:
+        pass
+    _CURSOR_HIDDEN = False
 
 
 class MouseListener:
@@ -114,12 +165,14 @@ class MouseListener:
         self._clear_queue()
         if self.center_lock:
             self._center_mouse()
+        hide_system_cursor()
         print("[Mouse] 开始采集")
 
     def pause(self):
         """暂停采集（响应 GAME_PAUSE）。"""
         self._game_active = False
         self._clear_queue()
+        show_system_cursor()
         print("[Mouse] 已暂停")
 
     def resume(self):
@@ -130,6 +183,7 @@ class MouseListener:
         self._last_y = None
         if self.center_lock:
             self._center_mouse()
+        hide_system_cursor()
         print("[Mouse] 已恢复")
 
     def stop(self):
@@ -140,6 +194,7 @@ class MouseListener:
         if self._keyboard_listener:
             self._keyboard_listener.stop()
         self._clear_queue()
+        show_system_cursor()
         print("[Mouse] 监听器已停止")
 
     # ==========================================
